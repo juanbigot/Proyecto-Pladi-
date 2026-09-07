@@ -47,7 +47,7 @@ export default function Navegacion({ seccionActiva, onCambiarSeccion }) {
           className={claseRecorrido}
           onClick={() => onCambiarSeccion('recorrido')}
         >
-          <ArrowLeftRight size={22} /> 
+          <ArrowLeftRight size={22} />
           <span>Recorrido</span>
         </button>
 
