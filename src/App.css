@@ -6,8 +6,6 @@
   background: #0d9be0;
 }
 
-
-/* Provisorio */
 .nav__marca {
   color: white;
   font-size: 22px;
@@ -84,7 +82,6 @@
 .buscador__input::placeholder {
   color: #757575;
 }
-
 /*para los iconos*/
 .buscador__btn-icon {
   background: transparent;
@@ -103,11 +100,21 @@
   opacity: 1;
 }
 
-/*MOBILE*/
+/*BUsqueda desktop */
+@media (min-width: 1000px) {
+  .buscador-container {
+    top: 80px; 
+    left: 32px;
+    right: auto;
+    width: 380px;
+  }
+}
+
+/*Para celular */
 
 @media (max-width: 999px) {
 
-/*Componente "Navegacion" */
+/* Para componente "Navegacion" */
   .nav {
     bottom: 0;
     left: 0;
@@ -140,7 +147,7 @@
   }
 }
 
-/*DESKTOP*/
+/* Para computadora */
 
 @media (min-width: 1000px) {
   .nav {
@@ -182,14 +189,4 @@
     height: 3px;
     background: #a4c639;
   }
-
-  /*Componente "Buscador"*/
-  
- .buscador-container {
-    top: 80px; 
-    left: 32px;
-    right: auto;
-    width: 380px;
-  }
-
 }
