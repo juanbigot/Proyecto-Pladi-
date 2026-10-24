@@ -16,6 +16,26 @@ const REFERENCIAS_B = [
   [66, 1670], [68, 1946], [69, 2094], [70, 2212], [71, 2367], [72, 2506],
 ];
 
+/*
+  Diagonales del casco.
+  En el sistema (p, q) de la ciudad (p: a lo largo del eje B, q: a lo largo del eje A) las diagonales forman
+  45° con las calles, así que cada una es una recta:
+    sentido  1:   q - p = c     (la 73 y la 79)
+    sentido -1:   q + p = c     (la 74 y la 80)
+  "c" y el tramo que cubre cada una (desde/hasta: metros a lo largo de la diagonal) se calcularon a partir de
+  las paradas de colectivo que están sobre cada diagonal (el desvío típico es de unos 10 a 15 m).
+  La 75, la 76, la 77 y la 78 no tienen paradas suficientes para ubicarlas, así que por ahora no se pueden buscar.
+*/
+const DIAGONALES = {
+  73: { sentido: 1, c: -4.2, desde: -3528, hasta: 3485 },
+  74: { sentido: -1, c: -25.5, desde: -3516, hasta: 3519 },
+  79: { sentido: 1, c: 826.9, desde: 822, hasta: 2895 },
+  80: { sentido: -1, c: 811.4, desde: 835, hasta: 2934 },
+};
+
+const NUMEROS_DIAGONAL = [73, 74, 75, 76, 77, 78, 79, 80];
+const MARGEN_DIAGONAL = 300;   // metros que se toleran más allá de las paradas conocidas de cada diagonal
+
 function esCalleA(n) {
   return n >= 1 && n <= 31;
 }
@@ -47,14 +67,98 @@ function posicionCalleB(numero) {
   return ultima[1];
 }
 
-function posicionEsquina(calleA, calleB) {
-  let p = posicionCalleB(calleB);
-  let q = ORIGEN_A + SEPARACION_A * calleA;
-
+// De las coordenadas (p, q) de la ciudad a [latitud, longitud]
+function puntoDePQ(p, q) {
   let x = p * EJE_B[0] + q * EJE_A[0];
   let y = p * EJE_B[1] + q * EJE_A[1];
 
   return [LAT_CENTRO + y / METROS_POR_GRADO_LAT, LNG_CENTRO + x / METROS_POR_GRADO_LNG];
+}
+
+function posicionEsquina(calleA, calleB) {
+  let p = posicionCalleB(calleB);
+  let q = ORIGEN_A + SEPARACION_A * calleA;
+
+  return puntoDePQ(p, q);
+}
+
+
+/* ---------- Cruces con diagonales ---------- */
+
+// Cada calle (o diagonal) se representa como una recta en el sistema (p, q):
+//   calle B: p constante   |   calle A: q constante   |   diagonal: q -/+ p = c
+function curvaDeCalle(numero, esDiagonal) {
+  if (esDiagonal) {
+    let diagonal = DIAGONALES[numero];
+    if (!diagonal) {
+      return null;
+    }
+    return { tipo: 'diagonal', sentido: diagonal.sentido, c: diagonal.c, desde: diagonal.desde, hasta: diagonal.hasta };
+  }
+  if (esCalleA(numero)) {
+    return { tipo: 'q', valor: ORIGEN_A + SEPARACION_A * numero };
+  }
+  if (esCalleB(numero)) {
+    return { tipo: 'p', valor: posicionCalleB(numero) };
+  }
+  return null;
+}
+
+function etiquetaCalle(numero, esDiagonal) {
+  if (esDiagonal) {
+    return 'diagonal ' + numero;
+  }
+  return 'calle ' + numero;
+}
+
+// Punto donde se cruzan dos calles, en (p, q). Devuelve { p, q } o { error }
+function cruzarCurvas(uno, otro) {
+  let p;
+  let q;
+
+  if (uno.tipo === 'diagonal' && otro.tipo === 'diagonal') {
+    if (uno.sentido === otro.sentido) {
+      return { error: 'Esas diagonales son paralelas: no se cruzan.' };
+    }
+    let sube = uno.sentido === 1 ? uno : otro;
+    let baja = uno.sentido === 1 ? otro : uno;
+    q = (sube.c + baja.c) / 2;
+    p = (baja.c - sube.c) / 2;
+  } else if (uno.tipo === 'diagonal' || otro.tipo === 'diagonal') {
+    let diagonal = uno.tipo === 'diagonal' ? uno : otro;
+    let calle = uno.tipo === 'diagonal' ? otro : uno;
+
+    if (calle.tipo === 'p') {
+      p = calle.valor;
+      q = diagonal.sentido === 1 ? p + diagonal.c : diagonal.c - p;
+    } else {
+      q = calle.valor;
+      p = diagonal.sentido === 1 ? q - diagonal.c : diagonal.c - q;
+    }
+  } else {
+    if (uno.tipo === otro.tipo) {
+      return { error: 'Esas calles son paralelas: no se cruzan.' };
+    }
+    let conP = uno.tipo === 'p' ? uno : otro;
+    let conQ = uno.tipo === 'q' ? uno : otro;
+    p = conP.valor;
+    q = conQ.valor;
+  }
+
+  // el cruce tiene que estar dentro del tramo que cubre cada diagonal
+  let curvas = [uno, otro];
+  for (let i = 0; i < curvas.length; i++) {
+    let curva = curvas[i];
+    if (curva.tipo !== 'diagonal') {
+      continue;
+    }
+    let avance = curva.sentido === 1 ? (p + q) / Math.SQRT2 : (q - p) / Math.SQRT2;
+    if (avance < curva.desde - MARGEN_DIAGONAL || avance > curva.hasta + MARGEN_DIAGONAL) {
+      return { error: 'La diagonal no llega hasta ese cruce.' };
+    }
+  }
+
+  return { p: p, q: q };
 }
 
 
@@ -103,24 +207,52 @@ function normalizar(texto) {
   t = t.replace(/[,;.()]/g, ' ');
   t = t.replace(/([a-z])(\d)/g, '$1 $2');                   
   t = t.replace(/(\d)([a-z])/g, '$1 $2');                  
+  t = t.replace(/\b(?:diagonal|diag|dg)\s*(\d+)\b/g, ' d$1 ');                   // "diagonal 74" -> "d74"
   t = t.replace(/\b(calles|calle|avenida|avda|av|diagonal|diag|dg)\b/g, ' ');
   t = t.replace(/^\s*(esquina|esq)\b/, ' ');
   t = t.replace(/\s+/g, ' ').trim();
   return t;
 }
 
+// "74" o "d74" (diagonal). Los números 73 a 80 solos también son diagonales: no hay calles con esos números en el casco
+function leerCalle(token) {
+  let diagonal = token.charAt(0) === 'd';
+  let numero = Number(diagonal ? token.slice(1) : token);
+  if (NUMEROS_DIAGONAL.includes(numero)) {
+    diagonal = true;
+  }
+  return { numero: numero, diagonal: diagonal };
+}
+
 function interpretar(texto, datosParadas) {
   let t = normalizar(texto);
   let m;
 
-  m = t.match(/^(\d+) entre (\d+) (?:y|e) (\d+)$/);
+  m = t.match(/^(d?\d+) entre (d?\d+) (?:y|e) (d?\d+)$/);
   if (m) {
-    return { tipo: 'entre', calle: Number(m[1]), desde: Number(m[2]), hasta: Number(m[3]) };
+    let calle = leerCalle(m[1]);
+    let desde = leerCalle(m[2]);
+    let hasta = leerCalle(m[3]);
+    return {
+      tipo: 'entre',
+      calle: calle.numero, desde: desde.numero, hasta: hasta.numero,
+      calleDiag: calle.diagonal, desdeDiag: desde.diagonal, hastaDiag: hasta.diagonal,
+    };
   }
 
-  m = t.match(/^(\d+) (?:y|e|esq|esquina|con|x) (\d+)$/);
+  m = t.match(/^(d?\d+) (?:y|e|esq|esquina|con|x) (d?\d+)$/);
   if (m) {
-    return { tipo: 'esquina', a: Number(m[1]), b: Number(m[2]) };
+    let a = leerCalle(m[1]);
+    let b = leerCalle(m[2]);
+    return { tipo: 'esquina', a: a.numero, b: b.numero, aDiag: a.diagonal, bDiag: b.diagonal };
+  }
+
+  // "diagonal 74 50": dos números seguidos y uno de los dos es una diagonal escrita con la palabra
+  m = t.match(/^(d?\d+) (d?\d+)$/);
+  if (m && (m[1].charAt(0) === 'd' || m[2].charAt(0) === 'd')) {
+    let a = leerCalle(m[1]);
+    let b = leerCalle(m[2]);
+    return { tipo: 'esquina', a: a.numero, b: b.numero, aDiag: a.diagonal, bDiag: b.diagonal };
   }
 
   m = t.match(/^(\d+) (?:n|nro|num|numero|al|altura|casa) (\d+)$/);
@@ -134,7 +266,10 @@ function interpretar(texto, datosParadas) {
     let segundo = Number(m[2]);
 
     if (segundo < 100) {
-      return { tipo: 'esquina', a: primero, b: segundo };
+      return {
+        tipo: 'esquina', a: primero, b: segundo,
+        aDiag: NUMEROS_DIAGONAL.includes(primero), bDiag: NUMEROS_DIAGONAL.includes(segundo),
+      };
     }
     if (buscarParadaEnEsquina(primero, segundo, datosParadas) !== null) {
       return { tipo: 'esquina', a: primero, b: segundo };
@@ -185,6 +320,49 @@ export function ubicarDireccion(texto, datosParadas) {
   let pedido = interpretar(texto, datosParadas);
   if (pedido === null) {
     return null;
+  }
+
+  // Pedidos donde interviene una diagonal: se resuelven con las rectas de cada calle
+  if (pedido.tipo === 'esquina' && (pedido.aDiag || pedido.bDiag)) {
+    let uno = curvaDeCalle(pedido.a, pedido.aDiag);
+    let otro = curvaDeCalle(pedido.b, pedido.bDiag);
+    if (uno === null || otro === null) {
+      return null;
+    }
+
+    let cruce = cruzarCurvas(uno, otro);
+    if (cruce.error) {
+      return { error: cruce.error };
+    }
+    return {
+      punto: puntoDePQ(cruce.p, cruce.q),
+      descripcion: 'esquina de ' + etiquetaCalle(pedido.a, pedido.aDiag) + ' y ' + etiquetaCalle(pedido.b, pedido.bDiag),
+    };
+  }
+
+  if (pedido.tipo === 'entre' && (pedido.calleDiag || pedido.desdeDiag || pedido.hastaDiag)) {
+    let base = curvaDeCalle(pedido.calle, pedido.calleDiag);
+    let primera = curvaDeCalle(pedido.desde, pedido.desdeDiag);
+    let segunda = curvaDeCalle(pedido.hasta, pedido.hastaDiag);
+    if (base === null || primera === null || segunda === null) {
+      return null;
+    }
+
+    let inicio = cruzarCurvas(base, primera);
+    if (inicio.error) {
+      return { error: inicio.error };
+    }
+    let fin = cruzarCurvas(base, segunda);
+    if (fin.error) {
+      return { error: fin.error };
+    }
+
+    return {
+      punto: puntoDePQ((inicio.p + fin.p) / 2, (inicio.q + fin.q) / 2),
+      descripcion:
+        etiquetaCalle(pedido.calle, pedido.calleDiag) + ' entre ' +
+        etiquetaCalle(pedido.desde, pedido.desdeDiag) + ' y ' + etiquetaCalle(pedido.hasta, pedido.hastaDiag),
+    };
   }
 
   if (pedido.tipo === 'esquina') {
@@ -334,7 +512,7 @@ export function direccionDePunto(punto) {
 
   if (metrosA <= metrosB) {
     if (b >= 52 && b < 53) {
-      return nombreDeCalle(calleA) + ' entre 52 y 53'; 
+      return nombreDeCalle(calleA) + ' entre 52 y 53';   // en esa cuadra no hay numeración
     }
 
     let primera = Math.floor(b);

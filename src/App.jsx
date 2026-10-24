@@ -62,8 +62,15 @@ function App() {
 
   }, [lineasVisibles]);
 
+  const paradasEnMapa = useMemo(() => {
+    if (paradaSeleccionada === null || paradasFiltradas.includes(paradaSeleccionada)) {
+      return paradasFiltradas;
+    }
+    return [...paradasFiltradas, paradaSeleccionada];
+  }, [paradasFiltradas, paradaSeleccionada]);
+
   return (
-    <div style={{ height: '100vh', width: '100vw', position: 'relative' }}>
+    <div className="app-raiz">
 
       <MapContainer
         ref={setMapa}
@@ -74,13 +81,13 @@ function App() {
       >
 
         <TileLayer
-  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-  referrerPolicy="strict-origin-when-cross-origin"
-  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-/>
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          referrerPolicy="strict-origin-when-cross-origin"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        />
 
         {seccionActiva === 'paradas' && banderaMostrada === null && (
-          <MarkersVisibles paradas={paradasFiltradas} onElegirParada={setParadaSeleccionada} />
+          <MarkersVisibles paradas={paradasEnMapa} onElegirParada={setParadaSeleccionada} />
         )}
 
         {seccionActiva === 'paradas' && banderaMostrada !== null && (
