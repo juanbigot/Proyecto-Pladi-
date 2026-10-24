@@ -1,10 +1,24 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { buscarViajes } from '../buscarViajes.js';
 import { ubicarDireccion, direccionDePunto } from '../ubicarDireccion.js';
+import { colorDeRamal } from './CapaRecorridos.jsx';
 
 const IconoCorazon = ({ relleno, color }) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill={relleno ? color : 'none'} stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.8 1-1a5.5 5.5 0 0 0 0-7.8z"></path>
+  </svg>
+);
+
+const IconoLupa = ({ color }) => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="7"></circle>
+    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+  </svg>
+);
+
+const IconoChevron = ({ arriba }) => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#666666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points={arriba ? '6 15 12 9 18 15' : '6 9 12 15 18 9'}></polyline>
   </svg>
 );
 
@@ -132,6 +146,52 @@ function obtenerRamales(linea, banderas) {
   }
 
   return ramales;
+}
+
+
+function centrarEnZonaLibre(mapa, coords, zoom) {
+  let contenedor = mapa.getContainer().getBoundingClientRect();
+  let ancho = contenedor.width;
+  let alto = contenedor.height;
+
+  let zona = { izquierda: 0, arriba: 0, derecha: ancho, abajo: alto };
+
+  let barra = document.querySelector('.nav');
+  if (barra) {
+    let r = barra.getBoundingClientRect();
+    if (r.height > 0) {
+      if (r.top - contenedor.top > alto / 2) {
+        zona.abajo = r.top - contenedor.top;
+      } else {
+        zona.arriba = r.bottom - contenedor.top;
+      }
+    }
+  }
+
+ 
+  let tarjeta = document.querySelector('.buscador-card');
+  if (tarjeta) {
+    let t = tarjeta.getBoundingClientRect();
+    if (t.right - contenedor.left < ancho * 0.6) {
+      zona.izquierda = t.right - contenedor.left;
+    } else {
+      zona.arriba = Math.max(zona.arriba, t.bottom - contenedor.top);
+    }
+  }
+
+ 
+  if (zona.derecha - zona.izquierda < 120 || zona.abajo - zona.arriba < 120) {
+    mapa.flyTo(coords, zoom);
+    return;
+  }
+
+  let destinoX = (zona.izquierda + zona.derecha) / 2;
+  let destinoY = (zona.arriba + zona.abajo) / 2;
+
+
+  let punto = mapa.project(coords, zoom);
+  let centro = mapa.unproject(punto.add([ancho / 2 - destinoX, alto / 2 - destinoY]), zoom);
+  mapa.flyTo(centro, zoom);
 }
 
 function contarLineasTildadas(lineasVisibles) {
@@ -318,6 +378,18 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   const [campoActivo, setCampoActivo] = useState('origen');
   const [mensaje, setMensaje] = useState('');
   const ultimoPunto = useRef({ origen: null, destino: null });
+  const [plegado, setPlegado] = useState(false);
+
+
+  useEffect(() => {
+    setPlegado(false);
+  }, [seccionActiva, paradaSeleccionada, viajeElegido, lineaSeleccionada, verFavoritos]);
+
+  useEffect(() => {
+    if (origen !== null && destino !== null) {
+      setPlegado(false);
+    }
+  }, [origen, destino]);
 
   const resultados = useMemo(() => {
     if (origen === null || destino === null) {
@@ -359,7 +431,11 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     onCambiarLineasVisibles(nuevas);
   }
 
-  function limpiarLineas() {
+  function mostrarTodasLasLineas() {
+    onCambiarLineasVisibles(crearLineasVisibles(datosParadas.lineas, true));
+  }
+
+  function ocultarTodasLasLineas() {
     onCambiarLineasVisibles(crearLineasVisibles(datosParadas.lineas, false));
   }
 
@@ -386,6 +462,18 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     }
   }
 
+  function centrarParada(coords) {
+    setTimeout(() => centrarEnZonaLibre(mapa, coords, 18), 80);
+  }
+
+  useEffect(() => {
+    if (paradaSeleccionada === null || !mapa) {
+      return;
+    }
+    let temporizador = setTimeout(() => centrarEnZonaLibre(mapa, paradaSeleccionada.coords, 18), 80);
+    return () => clearTimeout(temporizador);
+  }, [paradaSeleccionada]);
+
   function mostrarBandera(bandera) {
     onMostrarBandera(bandera);
 
@@ -399,7 +487,6 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     setSalidaSeleccionada(null);
     setTexto('');
     setVerFavoritos(false);
-    mapa.flyTo(parada.coords, 18);
   }
 
   function volverDeParada() {
@@ -418,7 +505,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   function volverDeSalida() {
     setSalidaSeleccionada(null);
     onMostrarBandera(null);
-    mapa.flyTo(paradaSeleccionada.coords, 18);
+    centrarParada(paradaSeleccionada.coords);
   }
 
   function cambiarSentido(nuevoSentido) {
@@ -433,7 +520,15 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
   function elegirLinea(linea) {
     onSeleccionarLinea(linea.abbr);
-    setTextoLinea('');
+    setTextoLinea(linea.nombre);   
+  }
+
+  function escribirLinea(texto) {
+    setTextoLinea(texto);
+
+    if (texto === '' && lineaSeleccionada !== null) {
+      onSeleccionarLinea(null);
+    }
   }
 
   function alternarRamal(idBandera) {
@@ -661,6 +756,29 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   }
 
   
+  let claseCard = 'buscador-card buscador-card--columna';
+  if (plegado) {
+    claseCard = claseCard + ' buscador-card--plegado';
+  }
+
+  function abrirAlEscribir(evento) {
+    if (evento.target.tagName === 'INPUT') {
+      setPlegado(false);
+    }
+  }
+
+  function dibujarAsa() {
+    let etiqueta = 'Ocultar el panel';
+    if (plegado) {
+      etiqueta = 'Mostrar el panel';
+    }
+    return (
+      <button type="button" className="buscador__plegar" onClick={() => setPlegado(!plegado)} aria-label={etiqueta}>
+        <IconoChevron arriba={!plegado} />
+      </button>
+    );
+  }
+
   if (seccionActiva === 'direccion') {
 
     if (viajeElegido !== null) {
@@ -712,7 +830,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
       return (
         <div className="buscador-container">
-          <div className="buscador-card buscador-card--columna">
+          <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
             <div className="buscador__fijo">
               <div className="cabecera-detalle">
@@ -734,6 +852,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               {pasos}
             </div>
 
+            {dibujarAsa()}
           </div>
         </div>
       );
@@ -754,21 +873,14 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
       ayuda = 'También podés seleccionarla desde el mapa';
     }
 
-    let avisoCaminar = null;
     let hayResultados = false;
     if (resultados !== null) {
       hayResultados = resultados.directos.length > 0 || resultados.combinaciones.length > 0;
-
-      if (resultados.distanciaDirecta < 600) {
-        let minutosCaminando = Math.round(resultados.distanciaDirecta / 80);
-        avisoCaminar = 'Los puntos están a ' + formatearMetros(resultados.distanciaDirecta) +
-          ': podés ir caminando (unos ' + minutosCaminando + ' min).';
-      }
     }
 
     return (
       <div className="buscador-container">
-        <div className="buscador-card buscador-card--columna">
+        <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
           <div className="buscador__fijo">
             <div className="buscador__fila">
@@ -818,8 +930,6 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               </div>
             )}
 
-            {avisoCaminar !== null && <div className="buscador__ayuda">{avisoCaminar}</div>}
-
             {resultados !== null && !hayResultados && (
               <div className="buscador__ayuda">
                 No se encontraron micros que conecten estos puntos (se buscaron paradas hasta 800 m a pie).
@@ -851,6 +961,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
             )}
           </div>
 
+          {dibujarAsa()}
         </div>
       </div>
     );
@@ -865,17 +976,30 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
           placeholder="Buscar línea"
           className="buscador__input buscador__input--gris"
           value={textoLinea}
-          onChange={(evento) => setTextoLinea(evento.target.value)}
+          onChange={(evento) => escribirLinea(evento.target.value)}
+          onFocus={(evento) => evento.target.select()}
         />
       </div>
     );
 
-    if (textoLinea !== '') {
+    let lineaElegida = null;
+    for (let i = 0; i < datosParadas.lineas.length; i++) {
+      if (datosParadas.lineas[i].abbr === lineaSeleccionada) {
+        lineaElegida = datosParadas.lineas[i];
+      }
+    }
+
+    let escribiendoOtraLinea = textoLinea !== '';
+    if (lineaElegida !== null && textoLinea === lineaElegida.nombre) {
+      escribiendoOtraLinea = false;
+    }
+
+    if (escribiendoOtraLinea) {
       let resultados = buscarLineas(textoLinea, datosParadas.lineas);
 
       return (
         <div className="buscador-container">
-          <div className="buscador-card buscador-card--columna">
+          <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
             <div className="buscador__fijo">
               {barraLinea}
@@ -904,22 +1028,16 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               ))}
             </div>
 
+            {dibujarAsa()}
           </div>
         </div>
       );
     }
 
-    let lineaElegida = null;
-    for (let i = 0; i < datosParadas.lineas.length; i++) {
-      if (datosParadas.lineas[i].abbr === lineaSeleccionada) {
-        lineaElegida = datosParadas.lineas[i];
-      }
-    }
-
     if (lineaElegida === null) {
       return (
         <div className="buscador-container">
-          <div className="buscador-card buscador-card--columna">
+          <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
             <div className="buscador__fijo">
               {barraLinea}
@@ -931,6 +1049,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               </div>
             </div>
 
+            {dibujarAsa()}
           </div>
         </div>
       );
@@ -940,7 +1059,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
     return (
       <div className="buscador-container">
-        <div className="buscador-card buscador-card--columna">
+        <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
           <div className="buscador__fijo">
             {barraLinea}
@@ -949,19 +1068,6 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
           </div>
 
           <div className="buscador__scroll">
-            <div className="cabecera-detalle">
-              <span
-                className="badge-linea"
-                style={{
-                  backgroundColor: obtenerColorLinea(lineaElegida),
-                  color: obtenerColorTexto(lineaElegida),
-                }}
-              >
-                {lineaElegida.nombre}
-              </span>
-              <span className="cabecera-detalle__texto">Línea {lineaElegida.nombre}</span>
-            </div>
-
             <div className="buscador__encabezado">
               <span>RAMALES ({ramales.length})</span>
               <span>
@@ -980,15 +1086,13 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
             )}
 
             <div className="lista-lineas">
-              {ramales.map((ramal) => {
+              {ramales.map((ramal, posicion) => {
 
                 let tildado = ramalesOcultos[ramal.id] !== true;
 
                 let claseFila = 'fila-linea';
-                let textoEstado = 'Oculto';
                 if (tildado) {
                   claseFila = 'fila-linea fila-linea--activa';
-                  textoEstado = 'Activo';
                 }
 
                 return (
@@ -1000,16 +1104,16 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
                     />
                     <span
                       className="fila-linea__color"
-                      style={{ backgroundColor: obtenerColorLinea(lineaElegida) }}
+                      style={{ backgroundColor: colorDeRamal(posicion) }}
                     ></span>
                     <span className="fila-linea__nombre">{ramal.nombre}</span>
-                    <span className="fila-linea__estado">{textoEstado}</span>
                   </label>
                 );
               })}
             </div>
           </div>
 
+          {dibujarAsa()}
         </div>
       </div>
     );
@@ -1035,7 +1139,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
       return (
         <div className="buscador-container">
-          <div className="buscador-card buscador-card--columna">
+          <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
             <div className="buscador__fijo">
               <div className="cabecera-detalle">
@@ -1079,7 +1183,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
       return (
         <div className="buscador-container">
-          <div className="buscador-card buscador-card--columna">
+          <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
             <div className="buscador__fijo">
               <div className="cabecera-detalle">
@@ -1097,7 +1201,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
                   className="boton-favorito"
                   onClick={() => alternarFavorito(paradaSeleccionada.id)}
                 >
-                  <IconoCorazon relleno={esFavorito(paradaSeleccionada.id)} color="#e63946" />
+                  <IconoCorazon relleno={esFavorito(paradaSeleccionada.id)} color="#0d9be0" />
                 </button>
               </div>
 
@@ -1133,6 +1237,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               ))}
             </div>
 
+            {dibujarAsa()}
           </div>
         </div>
       );
@@ -1144,7 +1249,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
       return (
         <div className="buscador-container">
-          <div className="buscador-card buscador-card--columna">
+          <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
             <div className="buscador__fijo">
               {dibujarBarraBusqueda()}
@@ -1164,6 +1269,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               {resultados.map((parada) => dibujarFilaParada(parada))}
             </div>
 
+            {dibujarAsa()}
           </div>
         </div>
       );
@@ -1174,7 +1280,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
       return (
         <div className="buscador-container">
-          <div className="buscador-card buscador-card--columna">
+          <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
             <div className="buscador__fijo">
               {dibujarBarraBusqueda()}
@@ -1194,6 +1300,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               {paradasFavoritas.map((parada) => dibujarFilaParada(parada))}
             </div>
 
+            {dibujarAsa()}
           </div>
         </div>
       );
@@ -1212,7 +1319,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
     return (
       <div className="buscador-container">
-        <div className="buscador-card buscador-card--columna">
+        <div className={claseCard} onFocusCapture={abrirAlEscribir}>
 
           <div className="buscador__fijo">
             {dibujarBarraBusqueda()}
@@ -1223,9 +1330,15 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
           <div className="buscador__scroll">
             <div className="buscador__encabezado">
               <span>MOSTRAR LÍNEAS EN MAPA</span>
-              <button type="button" className="buscador__link" onClick={limpiarLineas}>
-                Limpiar
-              </button>
+              <span>
+                <button type="button" className="buscador__link" onClick={mostrarTodasLasLineas}>
+                  Todas
+                </button>
+                {' · '}
+                <button type="button" className="buscador__link" onClick={ocultarTodasLasLineas}>
+                  Ninguna
+                </button>
+              </span>
             </div>
 
             <div className="lista-lineas">
@@ -1234,10 +1347,8 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
                 let tildada = lineasVisibles[linea.abbr] === true;
 
                 let claseFila = 'fila-linea';
-                let textoEstado = 'Oculto';
                 if (tildada) {
                   claseFila = 'fila-linea fila-linea--activa';
-                  textoEstado = 'Activo';
                 }
 
                 return (
@@ -1252,7 +1363,6 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
                       style={{ backgroundColor: obtenerColorLinea(linea) }}
                     ></span>
                     <span className="fila-linea__nombre">Línea {linea.nombre}</span>
-                    <span className="fila-linea__estado">{textoEstado}</span>
                   </label>
                 );
               })}
@@ -1271,6 +1381,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
             )}
           </div>
 
+          {dibujarAsa()}
         </div>
       </div>
     );

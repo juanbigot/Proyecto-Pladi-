@@ -13,35 +13,6 @@ function colorDeLinea(linea) {
   return color;
 }
 
-function indiceMasCercano(recorrido, coords) {
-  let mejor = 0;
-  let mejorDistancia = Infinity;
-
-  for (let i = 0; i < recorrido.length; i++) {
-    let dy = recorrido[i][0] - coords[0];
-    let dx = recorrido[i][1] - coords[1];
-    let distancia = dx * dx + dy * dy;
-
-    if (distancia < mejorDistancia) {
-      mejorDistancia = distancia;
-      mejor = i;
-    }
-  }
-
-  return mejor;
-}
-
-function cortarRecorrido(tramo) {
-  let recorrido = tramo.bandera.recorrido;
-  let desde = indiceMasCercano(recorrido, tramo.subida.coords);
-  let hasta = indiceMasCercano(recorrido, tramo.bajada.coords);
-
-  if (desde < hasta) {
-    return recorrido.slice(desde, hasta + 1);
-  }
-  return recorrido;
-}
-
 function CapaViaje({ origen, destino, viaje }) {
 
   let tramos = [];
@@ -68,7 +39,7 @@ function CapaViaje({ origen, destino, viaje }) {
       ))}
 
       {tramos.map((tramo, i) => {
-        let partes = cortarRecorrido(tramo);
+        let partes = tramo.recorrido;
 
         return (
           <Polyline
@@ -81,7 +52,7 @@ function CapaViaje({ origen, destino, viaje }) {
 
       {tramos.map((tramo, i) => {
         let color = colorDeLinea(tramo.linea);
-        let partes = cortarRecorrido(tramo);
+        let partes = tramo.recorrido;
 
         return (
           <Polyline

@@ -1,6 +1,50 @@
+import { useState, useEffect } from 'react';
 import { MapPin, Bus, ArrowLeftRight } from 'lucide-react';
 
+function hayCampoDeTexto() {
+  let elemento = document.activeElement;
+  if (!elemento) {
+    return false;
+  }
+  if (elemento.tagName === 'TEXTAREA') {
+    return true;
+  }
+  if (elemento.tagName !== 'INPUT') {
+    return false;
+  }
+  let sinTeclado = ['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image'];
+  return !sinTeclado.includes(elemento.type);
+}
+
 export default function Navegacion({ seccionActiva, onCambiarSeccion }) {
+
+  const [escribiendo, setEscribiendo] = useState(false);
+
+  useEffect(() => {
+    let temporizador = null;
+
+    function alSeleccionarCampo() {
+      clearTimeout(temporizador);
+      setEscribiendo(hayCampoDeTexto());
+    }
+    function alSoltarCampo() {
+      clearTimeout(temporizador);
+      temporizador = setTimeout(() => setEscribiendo(hayCampoDeTexto()), 100);
+    }
+
+    document.addEventListener('focusin', alSeleccionarCampo);
+    document.addEventListener('focusout', alSoltarCampo);
+    return () => {
+      clearTimeout(temporizador);
+      document.removeEventListener('focusin', alSeleccionarCampo);
+      document.removeEventListener('focusout', alSoltarCampo);
+    };
+  }, []);
+
+  let claseNav = 'nav';
+  if (escribiendo) {
+    claseNav = 'nav nav--oculta';
+  }
 
   let claseDireccion = 'nav__item';
   let claseParadas = 'nav__item';
@@ -19,7 +63,7 @@ export default function Navegacion({ seccionActiva, onCambiarSeccion }) {
   }
 
   return (
-    <nav className="nav">
+    <nav className={claseNav}>
 
       <div className="nav__marca">
         PLADI

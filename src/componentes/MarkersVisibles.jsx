@@ -32,8 +32,7 @@ function MarkersVisibles({ paradas, onElegirParada }) {
 
   function elegirParada(parada) {
     mapa.closePopup();
-    onElegirParada(parada);
-    mapa.flyTo(parada.coords, 18);
+    onElegirParada(parada);  
   }
 
   useEffect(() => {
