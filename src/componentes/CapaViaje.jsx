@@ -1,7 +1,27 @@
 import { Fragment } from 'react';
-import { Polyline, CircleMarker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+import { Polyline, CircleMarker, Marker, Popup } from 'react-leaflet';
 
 const SIN_BURBUJA = { bubblingMouseEvents: false };
+
+
+const ICONO_BANDERA = L.divIcon({
+  className: 'marcador-bandera',
+  html:
+    '<svg width="34" height="34" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">' +
+    '<g fill="#ffffff" stroke="#ffffff" stroke-width="5">' +
+    '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>' +
+    '<line x1="4" y1="22" x2="4" y2="15"/>' +
+    '</g>' +
+    '<g fill="#0d9be0" stroke="#0d9be0" stroke-width="2">' +
+    '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>' +
+    '<line x1="4" y1="22" x2="4" y2="15"/>' +
+    '</g>' +
+    '</svg>',
+  iconSize: [34, 34],
+  iconAnchor: [6, 31],
+  popupAnchor: [11, -27],
+});
 
 function colorDeLinea(linea) {
   let color = '#0d9be0';
@@ -92,20 +112,16 @@ function CapaViaje({ origen, destino, viaje }) {
         <CircleMarker
           center={origen}
           radius={10}
-          pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#16a34a', fillOpacity: 1, ...SIN_BURBUJA }}
+          pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#0d9be0', fillOpacity: 1, ...SIN_BURBUJA }}
         >
           <Popup>Punto de partida</Popup>
         </CircleMarker>
       )}
 
       {destino !== null && (
-        <CircleMarker
-          center={destino}
-          radius={10}
-          pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#dc2626', fillOpacity: 1, ...SIN_BURBUJA }}
-        >
+        <Marker position={destino} icon={ICONO_BANDERA}>
           <Popup>Punto de destino</Popup>
-        </CircleMarker>
+        </Marker>
       )}
     </>
   );

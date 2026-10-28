@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Flag, Clock, MapPin } from 'lucide-react';
 import { buscarViajes } from '../buscarViajes.js';
 import { ubicarDireccion, direccionDePunto } from '../ubicarDireccion.js';
-import { colorDeRamal } from './CapaRecorridos.jsx';
+import { colorDeRamal, parejaDeSentido } from './CapaRecorridos.jsx';
 
 const IconoCorazon = ({ relleno, color }) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill={relleno ? color : 'none'} stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -36,12 +37,103 @@ function crearLineasVisibles(lineas, valor) {
   return resultado;
 }
 
-function crearFavoritosIniciales(paradas) {
+const CLAVE_FAVORITOS = 'pladi_favoritos';
+
+function leerFavoritosGuardados() {
   let resultado = [];
-  for (let i = 0; i < 3; i++) {
-    resultado.push(paradas[i].id);
+
+  try {
+    let texto = localStorage.getItem(CLAVE_FAVORITOS);
+    if (texto === null) {
+      return resultado;
+    }
+
+    let lista = JSON.parse(texto);
+    if (!Array.isArray(lista)) {
+      return resultado;
+    }
+
+    for (let i = 0; i < lista.length; i++) {
+      if (typeof lista[i] === 'string') {
+        resultado.push(lista[i]);
+      }
+    }
+  } catch (error) {
+    return [];
   }
+
   return resultado;
+}
+
+function guardarFavoritos(favoritos) {
+  try {
+    localStorage.setItem(CLAVE_FAVORITOS, JSON.stringify(favoritos));
+  } catch (error) {
+    return;
+  }
+}
+
+const CLAVE_RECIENTES = 'pladi_recientes';
+const MAX_RECIENTES = 4;
+
+function leerRecientesGuardados() {
+  let resultado = [];
+
+  try {
+    let texto = localStorage.getItem(CLAVE_RECIENTES);
+    if (texto === null) {
+      return resultado;
+    }
+
+    let lista = JSON.parse(texto);
+    if (!Array.isArray(lista)) {
+      return resultado;
+    }
+
+    for (let i = 0; i < lista.length; i++) {
+      let item = lista[i];
+      let valido =
+        item &&
+        typeof item.texto === 'string' &&
+        Array.isArray(item.punto) &&
+        item.punto.length === 2 &&
+        Number.isFinite(item.punto[0]) &&
+        Number.isFinite(item.punto[1]);
+
+      if (valido && resultado.length < MAX_RECIENTES) {
+        resultado.push({ texto: item.texto, punto: [item.punto[0], item.punto[1]] });
+      }
+    }
+  } catch (error) {
+    return [];
+  }
+
+  return resultado;
+}
+
+function guardarRecientes(recientes) {
+  try {
+    localStorage.setItem(CLAVE_RECIENTES, JSON.stringify(recientes));
+  } catch (error) {
+    return;
+  }
+}
+
+function agregarReciente(recientes, texto, punto) {
+  let nuevos = [{ texto: texto, punto: punto }];
+
+  for (let i = 0; i < recientes.length; i++) {
+    let repetido = recientes[i].texto.toLowerCase() === texto.toLowerCase();
+    if (!repetido && nuevos.length < MAX_RECIENTES) {
+      nuevos.push(recientes[i]);
+    }
+  }
+
+  return nuevos;
+}
+
+function ponerMayuscula(texto) {
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
 function buscarLineaPorCodigo(codigo, lineas) {
@@ -133,22 +225,6 @@ function buscarLineas(texto, lineas) {
   return resultado;
 }
 
-function obtenerRamales(linea, banderas) {
-  let ramales = [];
-
-  for (let i = 0; i < banderas.length; i++) {
-    let bandera = banderas[i];
-    let tieneRecorrido = bandera.recorrido && bandera.recorrido.length > 0;
-
-    if (linea.codigos.includes(bandera.linea) && tieneRecorrido) {
-      ramales.push(bandera);
-    }
-  }
-
-  return ramales;
-}
-
-
 function centrarEnZonaLibre(mapa, coords, zoom) {
   let contenedor = mapa.getContainer().getBoundingClientRect();
   let ancho = contenedor.width;
@@ -168,7 +244,6 @@ function centrarEnZonaLibre(mapa, coords, zoom) {
     }
   }
 
- 
   let tarjeta = document.querySelector('.buscador-card');
   if (tarjeta) {
     let t = tarjeta.getBoundingClientRect();
@@ -179,7 +254,6 @@ function centrarEnZonaLibre(mapa, coords, zoom) {
     }
   }
 
- 
   if (zona.derecha - zona.izquierda < 120 || zona.abajo - zona.arriba < 120) {
     mapa.flyTo(coords, zoom);
     return;
@@ -187,7 +261,6 @@ function centrarEnZonaLibre(mapa, coords, zoom) {
 
   let destinoX = (zona.izquierda + zona.derecha) / 2;
   let destinoY = (zona.arriba + zona.abajo) / 2;
-
 
   let punto = mapa.project(coords, zoom);
   let centro = mapa.unproject(punto.add([ancho / 2 - destinoX, alto / 2 - destinoY]), zoom);
@@ -238,80 +311,6 @@ function generarSalidas(parada, datosParadas) {
   return salidas;
 }
 
-
-const LIMITE_VUELTA_KM = 2.5;
-
-function distanciaKm(a, b) {
-  let dy = (a[0] - b[0]) * 111;
-  let dx = (a[1] - b[1]) * 111 * Math.cos((a[0] * Math.PI) / 180);
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-function tomarMuestra(puntos, cantidad) {
-  if (puntos.length <= cantidad) {
-    return puntos;
-  }
-  let muestra = [];
-  for (let i = 0; i < cantidad; i++) {
-    muestra.push(puntos[Math.round((i * (puntos.length - 1)) / (cantidad - 1))]);
-  }
-  return muestra;
-}
-
-function distanciaMediaEntreRecorridos(a, b) {
-  let muestra = tomarMuestra(a, 25);
-  let total = 0;
-  for (let i = 0; i < muestra.length; i++) {
-    let minima = Infinity;
-    for (let j = 0; j < b.length; j++) {
-      let d = distanciaKm(muestra[i], b[j]);
-      if (d < minima) {
-        minima = d;
-      }
-    }
-    total = total + minima;
-  }
-  return total / muestra.length;
-}
-
-function puntajeVuelta(a, b) {
-  let ra = a.recorrido;
-  let rb = b.recorrido;
-  let extremos = distanciaKm(ra[0], rb[rb.length - 1]) + distanciaKm(ra[ra.length - 1], rb[0]);
-  return extremos + distanciaMediaEntreRecorridos(ra, rb) + distanciaMediaEntreRecorridos(rb, ra);
-}
-
-function buscarBanderaVuelta(banderaIda, banderas) {
-  if (!banderaIda.recorrido || banderaIda.recorrido.length === 0) {
-    return null;
-  }
-
-  let mejor = null;
-  let mejorPuntaje = Infinity;
-
-  for (let i = 0; i < banderas.length; i++) {
-    let otra = banderas[i];
-
-    if (otra.linea !== banderaIda.linea || otra.id === banderaIda.id) {
-      continue;
-    }
-    if (!otra.recorrido || otra.recorrido.length === 0) {
-      continue;
-    }
-
-    let puntaje = puntajeVuelta(banderaIda, otra);
-    if (puntaje < mejorPuntaje) {
-      mejorPuntaje = puntaje;
-      mejor = otra;
-    }
-  }
-
-  if (mejorPuntaje > LIMITE_VUELTA_KM) {
-    return null;
-  }
-  return mejor;
-}
-
 function formatearMetros(metros) {
   if (metros < 1000) {
     return Math.round(metros / 10) * 10 + ' m';
@@ -324,6 +323,18 @@ function nombreParada(parada) {
 }
 
 const MENSAJE_ERROR_UBICACION = 'Hubo un fallo en la redacción de la ubicación';
+
+const OPCIONES_UBICACION_ACTUAL = { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 };
+
+function mensajeDeErrorDeUbicacion(error) {
+  if (error && error.code === 1) {
+    return 'No diste permiso para usar tu ubicación. Podés habilitarlo en los ajustes del navegador.';
+  }
+  if (error && error.code === 3) {
+    return 'Tardó demasiado en obtener tu ubicación. Probá de nuevo.';
+  }
+  return 'No se pudo obtener tu ubicación.';
+}
 
 async function buscarDireccion(texto) {
   let url =
@@ -364,11 +375,31 @@ async function buscarNombreDePunto(punto) {
   return texto;
 }
 
-function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSeleccionarLinea, mapa, onMostrarBandera, paradaSeleccionada, onElegirParada, lineasVisibles, onCambiarLineasVisibles, ramalesOcultos, onCambiarRamalesOcultos, origen, destino, viajeElegido, onCambiarOrigen, onCambiarDestino, onElegirViaje }) {
+function useMedia(consulta) {
+  const [coincide, setCoincide] = useState(() => window.matchMedia(consulta).matches);
+
+  useEffect(() => {
+    let lista = window.matchMedia(consulta);
+
+    function alCambiar() {
+      setCoincide(lista.matches);
+    }
+
+    alCambiar();
+    lista.addEventListener('change', alCambiar);
+    return () => {
+      lista.removeEventListener('change', alCambiar);
+    };
+  }, [consulta]);
+
+  return coincide;
+}
+
+function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLinea, sentidoRecorrido, onSeleccionarLinea, mapa, onMostrarBandera, paradaSeleccionada, onElegirParada, lineasVisibles, onCambiarLineasVisibles, ramalesOcultos, onCambiarRamalesOcultos, origen, destino, viajeElegido, onCambiarOrigen, onCambiarDestino, onElegirViaje }) {
 
   const [texto, setTexto] = useState('');
   const [verFavoritos, setVerFavoritos] = useState(false);
-  const [favoritos, setFavoritos] = useState(crearFavoritosIniciales(datosParadas.paradas));
+  const [favoritos, setFavoritos] = useState(leerFavoritosGuardados);
   const [salidaSeleccionada, setSalidaSeleccionada] = useState(null);
   const [sentido, setSentido] = useState('ida');
   const [banderaVuelta, setBanderaVuelta] = useState(null);
@@ -377,19 +408,70 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   const [textoDestino, setTextoDestino] = useState('');
   const [campoActivo, setCampoActivo] = useState('origen');
   const [mensaje, setMensaje] = useState('');
+  const [recientes, setRecientes] = useState(leerRecientesGuardados);
+  const [desplegable, setDesplegable] = useState(null);
+  const [camposConError, setCamposConError] = useState({ origen: false, destino: false });
+  const [seleccionandoEnMapa, setSeleccionandoEnMapa] = useState(null);
+  const esCompu = useMedia('(min-width: 1000px)');
+  const esTablet = useMedia('(min-width: 560px) and (max-width: 999px)');
+  const esTabletHorizontal = useMedia('(min-width: 560px) and (max-width: 999px) and (orientation: landscape)');
+  const [seleccionCentral, setSeleccionCentral] = useState(null);
+  const [centro, setCentro] = useState(null);
+  const [alturaCentro, setAlturaCentro] = useState(null);
+  const tarjetaRef = useRef(null);
   const ultimoPunto = useRef({ origen: null, destino: null });
+  const pidiendoUbicacion = useRef(false);
+  const pidioAlEntrar = useRef(false);
+  const origenActual = useRef(origen);
+  const destinoActual = useRef(destino);
+  const recientesActuales = useRef(recientes);
+  const textoOrigenActual = useRef('');
+  origenActual.current = origen;
+  destinoActual.current = destino;
+  recientesActuales.current = recientes;
+  textoOrigenActual.current = textoOrigen;
   const [plegado, setPlegado] = useState(false);
-
 
   useEffect(() => {
     setPlegado(false);
   }, [seccionActiva, paradaSeleccionada, viajeElegido, lineaSeleccionada, verFavoritos]);
 
   useEffect(() => {
+    if (pidioAlEntrar.current) {
+      return;
+    }
+    pidioAlEntrar.current = true;
+    pedirUbicacionActual(false, 'origen', false);
+  }, []);
+
+  useEffect(() => {
     if (origen !== null && destino !== null) {
       setPlegado(false);
     }
   }, [origen, destino]);
+
+  useEffect(() => {
+    setDesplegable(null);
+    setSeleccionCentral(null);
+    cancelarSeleccionEnMapa();
+  }, [seccionActiva]);
+
+  useEffect(() => {
+    if (desplegable === null) {
+      return;
+    }
+
+    function alTocarAfuera(evento) {
+      if (tarjetaRef.current && !tarjetaRef.current.contains(evento.target)) {
+        setDesplegable(null);
+      }
+    }
+
+    document.addEventListener('pointerdown', alTocarAfuera);
+    return () => {
+      document.removeEventListener('pointerdown', alTocarAfuera);
+    };
+  }, [desplegable]);
 
   const resultados = useMemo(() => {
     if (origen === null || destino === null) {
@@ -399,23 +481,24 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   }, [origen, destino, datosParadas]);
 
   useEffect(() => {
-    if (mapa === null || seccionActiva !== 'direccion') {
+    if (mapa === null || seccionActiva !== 'direccion' || seleccionandoEnMapa === null) {
       return;
     }
 
     function alHacerClickEnElMapa(evento) {
       let punto = [evento.latlng.lat, evento.latlng.lng];
 
-      if (campoActivo === 'origen') {
+      if (seleccionandoEnMapa === 'origen') {
         onCambiarOrigen(punto);
-        escribirDireccion('origen', punto);
+        escribirDireccion('origen', punto, true);
         setCampoActivo('destino');
       } else {
         onCambiarDestino(punto);
-        escribirDireccion('destino', punto);
+        escribirDireccion('destino', punto, true);
       }
       onElegirViaje(null);
       setMensaje('');
+      setSeleccionandoEnMapa(null);
     }
 
     mapa.on('click', alHacerClickEnElMapa);
@@ -423,7 +506,111 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     return () => {
       mapa.off('click', alHacerClickEnElMapa);
     };
-  }, [mapa, seccionActiva, campoActivo]);
+  }, [mapa, seccionActiva, seleccionandoEnMapa]);
+
+  useEffect(() => {
+    if (seleccionCentral === null || mapa === null) {
+      setCentro(null);
+      setAlturaCentro(null);
+      return;
+    }
+
+    let cuadro = null;
+    let temporizador = null;
+    let version = 0;
+
+    function medirCentro() {
+      let caja = mapa.getContainer().getBoundingClientRect();
+      let abajo = caja.height;
+
+      let barra = document.querySelector('.nav');
+      if (barra) {
+        let r = barra.getBoundingClientRect();
+        if (r.height > 0 && r.top - caja.top > caja.height / 2) {
+          abajo = r.top - caja.top;
+        }
+      }
+      return { x: caja.width / 2, y: abajo / 2 };
+    }
+
+    function actualizar(terminoDeMover) {
+      let zona = medirCentro();
+      setAlturaCentro(zona.y);
+
+      let latlng = mapa.containerPointToLatLng([zona.x, zona.y]);
+      let punto = [latlng.lat, latlng.lng];
+
+      version = version + 1;
+      let miVersion = version;
+      clearTimeout(temporizador);
+
+      let texto = direccionDePunto(punto, datosParadas);
+      if (texto !== null) {
+        setCentro({ punto: punto, texto: texto, listo: true, coordenadas: false });
+        return;
+      }
+
+      let coordenadas = punto[0].toFixed(5) + ', ' + punto[1].toFixed(5);
+      setCentro({ punto: punto, texto: coordenadas, listo: false, coordenadas: true });
+
+      if (!terminoDeMover) {
+        return;
+      }
+
+      temporizador = setTimeout(async () => {
+        let nombre = null;
+        try {
+          nombre = await buscarNombreDePunto(punto);
+        } catch (error) {
+          nombre = null;
+        }
+
+        if (miVersion !== version) {
+          return;
+        }
+
+        if (nombre !== null) {
+          setCentro({ punto: punto, texto: nombre, listo: true, coordenadas: false });
+        } else {
+          setCentro({ punto: punto, texto: coordenadas, listo: true, coordenadas: true });
+        }
+      }, 300);
+    }
+
+    function alMover() {
+      if (cuadro === null) {
+        cuadro = requestAnimationFrame(() => {
+          cuadro = null;
+          actualizar(false);
+        });
+      }
+    }
+
+    function alTerminarDeMover() {
+      if (cuadro !== null) {
+        cancelAnimationFrame(cuadro);
+        cuadro = null;
+      }
+      actualizar(true);
+    }
+
+    actualizar(true);
+
+    mapa.on('move', alMover);
+    mapa.on('moveend', alTerminarDeMover);
+    window.addEventListener('resize', alTerminarDeMover);
+
+    return () => {
+      mapa.off('move', alMover);
+      mapa.off('moveend', alTerminarDeMover);
+      window.removeEventListener('resize', alTerminarDeMover);
+      if (cuadro !== null) {
+        cancelAnimationFrame(cuadro);
+      }
+      clearTimeout(temporizador);
+      version = version + 1;
+    };
+  }, [mapa, seleccionCentral]);
 
   function alternarLinea(abbr) {
     let nuevas = { ...lineasVisibles };
@@ -449,17 +636,20 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   }
 
   function alternarFavorito(idParada) {
+    let nuevos = [];
+
     if (esFavorito(idParada)) {
-      let nuevos = [];
       for (let i = 0; i < favoritos.length; i++) {
         if (favoritos[i] !== idParada) {
           nuevos.push(favoritos[i]);
         }
       }
-      setFavoritos(nuevos);
     } else {
-      setFavoritos([...favoritos, idParada]);
+      nuevos = [...favoritos, idParada];
     }
+
+    setFavoritos(nuevos);
+    guardarFavoritos(nuevos);
   }
 
   function centrarParada(coords) {
@@ -498,7 +688,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   function elegirSalida(salida) {
     setSalidaSeleccionada(salida);
     setSentido('ida');
-    setBanderaVuelta(buscarBanderaVuelta(salida.bandera, datosParadas.banderas));
+    setBanderaVuelta(parejaDeSentido(datosParadas, salida.bandera));
     mostrarBandera(salida.bandera);
   }
 
@@ -520,7 +710,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
   function elegirLinea(linea) {
     onSeleccionarLinea(linea.abbr);
-    setTextoLinea(linea.nombre);   
+    setTextoLinea(linea.nombre);
   }
 
   function escribirLinea(texto) {
@@ -541,19 +731,33 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     onCambiarRamalesOcultos(nuevos);
   }
 
-  function mostrarTodosLosRamales() {
-    onCambiarRamalesOcultos({});
+  function mostrarTodosLosRamales(ramales) {
+    let nuevos = { ...ramalesOcultos };
+    for (let i = 0; i < ramales.length; i++) {
+      delete nuevos[ramales[i].id];
+    }
+    onCambiarRamalesOcultos(nuevos);
   }
 
   function ocultarTodosLosRamales(ramales) {
-    let nuevos = {};
+    let nuevos = { ...ramalesOcultos };
     for (let i = 0; i < ramales.length; i++) {
       nuevos[ramales[i].id] = true;
     }
     onCambiarRamalesOcultos(nuevos);
   }
 
+  function marcarError(campo, hayError) {
+    setCamposConError((actual) => {
+      if (actual[campo] === hayError) {
+        return actual;
+      }
+      return { ...actual, [campo]: hayError };
+    });
+  }
+
   function ponerTexto(campo, texto) {
+    marcarError(campo, false);
     if (campo === 'origen') {
       setTextoOrigen(texto);
     } else {
@@ -561,12 +765,15 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     }
   }
 
-  async function escribirDireccion(campo, punto) {
+  async function escribirDireccion(campo, punto, guardar) {
     ultimoPunto.current[campo] = punto;
 
-    let texto = direccionDePunto(punto);
+    let texto = direccionDePunto(punto, datosParadas);
     if (texto !== null) {
       ponerTexto(campo, texto);
+      if (guardar) {
+        guardarReciente(texto, punto);
+      }
       return;
     }
 
@@ -577,6 +784,9 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
       if (nombre !== null && ultimoPunto.current[campo] === punto) {
         ponerTexto(campo, nombre);
+        if (guardar) {
+          guardarReciente(nombre, punto);
+        }
       }
     } catch (error) {
     }
@@ -587,12 +797,15 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
       return;
     }
 
+    setDesplegable(null);
+
     let punto = null;
 
     let local = ubicarDireccion(texto, datosParadas);
 
     if (local !== null && local.error) {
       setMensaje(MENSAJE_ERROR_UBICACION);
+      marcarError(campo, true);
       return;
     }
 
@@ -605,37 +818,167 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
         punto = await buscarDireccion(texto);
       } catch (error) {
         setMensaje(MENSAJE_ERROR_UBICACION);
+        marcarError(campo, true);
         return;
       }
 
       if (punto === null) {
         setMensaje(MENSAJE_ERROR_UBICACION);
+        marcarError(campo, true);
         return;
       }
     }
 
+    let textoReciente = texto.trim();
+    if (local !== null) {
+      textoReciente = ponerMayuscula(local.descripcion);
+    }
+
+    aplicarPunto(campo, punto, null, true);
+    guardarReciente(textoReciente, punto);
+  }
+
+  function guardarReciente(texto, punto) {
+    let nuevos = agregarReciente(recientesActuales.current, texto, punto);
+    recientesActuales.current = nuevos;
+    setRecientes(nuevos);
+    guardarRecientes(nuevos);
+  }
+
+  function aplicarPunto(campo, punto, textoCampo, volar) {
     ultimoPunto.current[campo] = punto;
     setMensaje('');
+    setSeleccionandoEnMapa(null);
+    marcarError(campo, false);
 
-    let otroPunto = destino;
+    let otroPunto = null;
     if (campo === 'origen') {
       onCambiarOrigen(punto);
+      otroPunto = destinoActual.current;
       setCampoActivo('destino');
     } else {
-      otroPunto = origen;
       onCambiarDestino(punto);
+      otroPunto = origenActual.current;
     }
     onElegirViaje(null);
 
-    if (otroPunto !== null) {
-      mapa.flyToBounds([punto, otroPunto], { padding: [60, 60] });
-    } else {
-      mapa.flyTo(punto, 16);
+    if (textoCampo !== null) {
+      ponerTexto(campo, textoCampo);
     }
+
+    if (volar && mapa) {
+      if (otroPunto !== null) {
+        mapa.flyToBounds([punto, otroPunto], { padding: [60, 60] });
+      } else {
+        mapa.flyTo(punto, 16);
+      }
+    }
+  }
+
+  function pedirUbicacionActual(avisar, campo, forzar) {
+    if (!navigator.geolocation) {
+      if (avisar) {
+        setMensaje('Este navegador no permite obtener tu ubicación.');
+      }
+      return;
+    }
+
+    if (!forzar && pidiendoUbicacion.current) {
+      return;
+    }
+    if (!forzar) {
+      pidiendoUbicacion.current = true;
+    }
+
+    if (avisar) {
+      setMensaje('Buscando tu ubicación...');
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (posicion) => {
+        pidiendoUbicacion.current = false;
+
+        if (!forzar && (origenActual.current !== null || textoOrigenActual.current !== '')) {
+          if (avisar) {
+            setMensaje('');
+          }
+          return;
+        }
+
+        let punto = [posicion.coords.latitude, posicion.coords.longitude];
+
+        aplicarPunto(campo, punto, null, avisar);
+        escribirDireccion(campo, punto, false);
+      },
+      (error) => {
+        pidiendoUbicacion.current = false;
+
+        if (avisar) {
+          setMensaje(mensajeDeErrorDeUbicacion(error));
+        }
+      },
+      OPCIONES_UBICACION_ACTUAL
+    );
+  }
+
+  function cancelarSeleccionEnMapa() {
+    setSeleccionandoEnMapa(null);
+  }
+
+  function abrirDesplegable(campo) {
+    setCampoActivo(campo);
+    setDesplegable(campo);
+
+    if (esCompu) {
+      setSeleccionandoEnMapa(campo);
+    } else {
+      setSeleccionandoEnMapa(null);
+    }
+  }
+
+  function elegirUbicacionActual(campo) {
+    setDesplegable(null);
+    setSeleccionandoEnMapa(null);
+    pedirUbicacionActual(true, campo, true);
+  }
+
+  function elegirReciente(campo, reciente) {
+    setDesplegable(null);
+    aplicarPunto(campo, reciente.punto, reciente.texto, true);
+    guardarReciente(reciente.texto, reciente.punto);
+  }
+
+  function seleccionarEnElMapa(campo) {
+    setCampoActivo(campo);
+    setDesplegable(null);
+
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
+
+    setSeleccionCentral(campo);
+  }
+
+  function establecerPuntoCentral() {
+    if (seleccionCentral === null || centro === null || !centro.listo) {
+      return;
+    }
+
+    aplicarPunto(seleccionCentral, centro.punto, centro.texto, false);
+
+    if (!centro.coordenadas) {
+      guardarReciente(centro.texto, centro.punto);
+    }
+    setSeleccionCentral(null);
+  }
+
+  function cancelarSeleccionCentral() {
+    setSeleccionCentral(null);
   }
 
   function cambiarTextoPunto(campo, valor) {
     ultimoPunto.current[campo] = null;
+    marcarError(campo, false);
 
     if (campo === 'origen') {
       setTextoOrigen(valor);
@@ -662,6 +1005,9 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     setTextoDestino('');
     setCampoActivo('origen');
     setMensaje('');
+    setDesplegable(null);
+    setSeleccionandoEnMapa(null);
+    setCamposConError({ origen: false, destino: false });
   }
 
   function elegirViaje(viaje) {
@@ -713,6 +1059,70 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     );
   }
 
+  function dibujarDesplegable(campo) {
+    let mostrarUbicacionActual = !esTablet;
+    let mostrarRecientes = !esTabletHorizontal;
+    let mostrarSeleccionEnMapa = !esCompu;
+
+    return (
+      <div className="desplegable">
+        {esCompu && <div className="buscador__ayuda">También podés seleccionar desde el mapa</div>}
+
+        {mostrarUbicacionActual && (
+          <>
+            <button type="button" className="desplegable__opcion" onClick={() => elegirUbicacionActual(campo)}>
+              <span className="desplegable__icono">
+                <span className="desplegable__circulo"></span>
+              </span>
+              <span className="desplegable__texto">Ubicación actual</span>
+            </button>
+
+            <div className="buscador__separador"></div>
+          </>
+        )}
+
+        {mostrarRecientes && (
+          <>
+            <div className="desplegable__titulo">Recientes</div>
+
+            {recientes.length === 0 && (
+              <div className="desplegable__vacio">Todavía no hay ubicaciones recientes.</div>
+            )}
+
+            {recientes.map((reciente) => (
+              <button
+                key={reciente.texto}
+                type="button"
+                className="desplegable__opcion"
+                onClick={() => elegirReciente(campo, reciente)}
+              >
+                <span className="desplegable__icono">
+                  <Clock size={20} />
+                </span>
+                <span className="desplegable__texto">{reciente.texto}</span>
+              </button>
+            ))}
+          </>
+        )}
+
+        {mostrarRecientes && mostrarSeleccionEnMapa && <div className="buscador__separador"></div>}
+
+        {mostrarSeleccionEnMapa && (
+          <button
+            type="button"
+            className="desplegable__opcion desplegable__opcion--fuerte"
+            onClick={() => seleccionarEnElMapa(campo)}
+          >
+            <span className="desplegable__icono">
+              <MapPin size={22} />
+            </span>
+            <span className="desplegable__texto">Seleccionar en el mapa</span>
+          </button>
+        )}
+      </div>
+    );
+  }
+
   function dibujarBarraBusqueda() {
     let iconoBoton = <IconoCorazon relleno={verFavoritos} color="#ffffff" />;
     let alHacerClickEnBoton = () => setVerFavoritos(!verFavoritos);
@@ -755,7 +1165,6 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
     );
   }
 
-  
   let claseCard = 'buscador-card buscador-card--columna';
   if (plegado) {
     claseCard = claseCard + ' buscador-card--plegado';
@@ -780,6 +1189,78 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
   }
 
   if (seccionActiva === 'direccion') {
+
+    if (seleccionCentral !== null) {
+      let textoCentro = 'Seleccionar ubicación';
+      let puedeEstablecer = false;
+      if (centro !== null) {
+        if (centro.texto !== '') {
+          textoCentro = centro.texto;
+        }
+        puedeEstablecer = centro.listo;
+      }
+
+      let claseEstablecer = 'seleccion__establecer';
+      if (puedeEstablecer) {
+        claseEstablecer = 'seleccion__establecer seleccion__establecer--activo';
+      }
+
+      let punto = <span className="seleccion__circulo"></span>;
+      if (seleccionCentral === 'destino') {
+        punto = (
+          <svg
+            className="seleccion__bandera"
+            width="34"
+            height="34"
+            viewBox="0 0 24 24"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <g fill="#ffffff" stroke="#ffffff" strokeWidth="5">
+              <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+              <line x1="4" y1="22" x2="4" y2="15" />
+            </g>
+            <g fill="#0d9be0" stroke="#0d9be0" strokeWidth="2">
+              <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+              <line x1="4" y1="22" x2="4" y2="15" />
+            </g>
+          </svg>
+        );
+      }
+
+      return (
+        <>
+          <div className="buscador-container">
+            <div className="buscador-card buscador-card--seleccion">
+              <button
+                type="button"
+                className="boton-atras seleccion__cancelar"
+                onClick={cancelarSeleccionCentral}
+                aria-label="Cancelar"
+              >
+                <IconoFlechaAtras />
+              </button>
+              <div className="seleccion__texto">{textoCentro}</div>
+            </div>
+          </div>
+
+          {alturaCentro !== null && (
+            <div className="seleccion__pin" style={{ top: alturaCentro + 'px' }}>
+              {punto}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className={claseEstablecer}
+            disabled={!puedeEstablecer}
+            onClick={establecerPuntoCentral}
+          >
+            Establecer
+          </button>
+        </>
+      );
+    }
 
     if (viajeElegido !== null) {
 
@@ -816,7 +1297,6 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
               <span className="fila-salida__destino">{tramo.bandera.nombre}</span>
               <span className="fila-salida__destino">Bajá en {nombreParada(tramo.bajada)}</span>
             </span>
-            <span className="fila-salida__tiempo">{tramo.cantidadParadas} paradas</span>
           </div>
         );
       }
@@ -858,19 +1338,43 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
       );
     }
 
-    let estiloOrigen = {};
-    let estiloDestino = {};
+    let claseOrigen = 'buscador__input buscador__input--gris buscador__input--origen';
+    let claseDestino = 'buscador__input buscador__input--gris buscador__input--destino';
     if (campoActivo === 'origen') {
-      estiloOrigen = { boxShadow: '0 0 0 2px #0d9be0' };
+      claseOrigen = claseOrigen + ' buscador__input--activo';
     } else {
-      estiloDestino = { boxShadow: '0 0 0 2px #0d9be0' };
+      claseDestino = claseDestino + ' buscador__input--activo';
+    }
+
+    if (camposConError.origen) {
+      claseOrigen = claseOrigen + ' buscador__input--error';
+    }
+    if (camposConError.destino) {
+      claseDestino = claseDestino + ' buscador__input--error';
     }
 
     let ayuda = null;
     if (mensaje !== '') {
       ayuda = mensaje;
     } else if (origen === null || destino === null) {
-      ayuda = 'También podés seleccionarla desde el mapa';
+      ayuda = 'También podés tocar un campo y elegir "Seleccionar en el mapa"';
+      if (esCompu) {
+        ayuda = 'También podés tocar un campo y hacer clic en el mapa';
+      }
+    }
+
+    let claseTarjeta = claseCard;
+    if (desplegable !== null) {
+      claseTarjeta = claseCard + ' buscador-card--desplegable';
+    }
+
+    let claseCirculoInicio = 'buscador__punto buscador__punto--vacio';
+    let colorBandera = '#9ca3af';
+    if (origen !== null) {
+      claseCirculoInicio = 'buscador__punto buscador__punto--lleno';
+    }
+    if (destino !== null) {
+      colorBandera = '#0d9be0';
     }
 
     let hayResultados = false;
@@ -880,38 +1384,52 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
 
     return (
       <div className="buscador-container">
-        <div className={claseCard} onFocusCapture={abrirAlEscribir}>
+        <div ref={tarjetaRef} className={claseTarjeta} onFocusCapture={abrirAlEscribir}>
 
           <div className="buscador__fijo">
             <div className="buscador__fila">
+              <span className="buscador__marca">
+                <span className={claseCirculoInicio}></span>
+              </span>
               <input
                 type="text"
                 placeholder="Punto de inicio"
-                className="buscador__input buscador__input--gris"
-                style={estiloOrigen}
+                className={claseOrigen}
                 value={textoOrigen}
-                onFocus={() => setCampoActivo('origen')}
+                onFocus={() => abrirDesplegable('origen')}
+                onClick={() => abrirDesplegable('origen')}
                 onChange={(evento) => cambiarTextoPunto('origen', evento.target.value)}
                 onKeyDown={(evento) => {
                   if (evento.key === 'Enter') {
                     buscarPunto('origen', textoOrigen);
+                  }
+                  if (evento.key === 'Escape') {
+                    setDesplegable(null);
+                    setSeleccionandoEnMapa(null);
                   }
                 }}
               />
             </div>
 
             <div className="buscador__fila">
+              <span className="buscador__marca">
+                <Flag size={18} color={colorBandera} fill={colorBandera} />
+              </span>
               <input
                 type="text"
                 placeholder="Punto de destino"
-                className="buscador__input buscador__input--gris"
-                style={estiloDestino}
+                className={claseDestino}
                 value={textoDestino}
-                onFocus={() => setCampoActivo('destino')}
+                onFocus={() => abrirDesplegable('destino')}
+                onClick={() => abrirDesplegable('destino')}
                 onChange={(evento) => cambiarTextoPunto('destino', evento.target.value)}
                 onKeyDown={(evento) => {
                   if (evento.key === 'Enter') {
                     buscarPunto('destino', textoDestino);
+                  }
+                  if (evento.key === 'Escape') {
+                    setDesplegable(null);
+                    setSeleccionandoEnMapa(null);
                   }
                 }}
               />
@@ -919,6 +1437,10 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
           </div>
 
           <div className="buscador__scroll">
+            {desplegable !== null && dibujarDesplegable(desplegable)}
+
+            {desplegable === null && (
+            <>
             {ayuda !== null && <div className="buscador__ayuda">{ayuda}</div>}
 
             {(origen !== null || destino !== null) && (
@@ -958,6 +1480,8 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
                   {resultados.combinaciones.map((viaje, indice) => dibujarFilaViaje(viaje, indice))}
                 </div>
               </>
+            )}
+            </>
             )}
           </div>
 
@@ -1055,7 +1579,14 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
       );
     }
 
-    let ramales = obtenerRamales(lineaElegida, datosParadas.banderas);
+    let ramales = sentidosLinea[sentidoRecorrido];
+
+    let cantidadSeleccionados = 0;
+    for (let i = 0; i < ramales.length; i++) {
+      if (ramalesOcultos[ramales[i].id] !== true) {
+        cantidadSeleccionados = cantidadSeleccionados + 1;
+      }
+    }
 
     return (
       <div className="buscador-container">
@@ -1065,13 +1596,11 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
             {barraLinea}
 
             <div className="buscador__separador"></div>
-          </div>
 
-          <div className="buscador__scroll">
             <div className="buscador__encabezado">
-              <span>RAMALES ({ramales.length})</span>
+              <span>RAMALES ({cantidadSeleccionados})</span>
               <span>
-                <button type="button" className="buscador__link" onClick={mostrarTodosLosRamales}>
+                <button type="button" className="buscador__link" onClick={() => mostrarTodosLosRamales(ramales)}>
                   Todos
                 </button>
                 {' · '}
@@ -1080,8 +1609,10 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
                 </button>
               </span>
             </div>
+          </div>
 
-            {ramales.length === 0 && (
+          <div className="buscador__scroll">
+            {sentidosLinea.ida.length + sentidosLinea.vuelta.length === 0 && (
               <div className="buscador__ayuda">Esta línea no tiene recorridos cargados.</div>
             )}
 
@@ -1243,7 +1774,6 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
       );
     }
 
-  
     if (texto !== '') {
       let resultados = buscarParadas(texto, datosParadas.paradas);
 
@@ -1325,9 +1855,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
             {dibujarBarraBusqueda()}
 
             <div className="buscador__separador"></div>
-          </div>
 
-          <div className="buscador__scroll">
             <div className="buscador__encabezado">
               <span>MOSTRAR LÍNEAS EN MAPA</span>
               <span>
@@ -1340,7 +1868,9 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, onSelecciona
                 </button>
               </span>
             </div>
+          </div>
 
+          <div className="buscador__scroll">
             <div className="lista-lineas">
               {datosParadas.lineas.map((linea) => {
 

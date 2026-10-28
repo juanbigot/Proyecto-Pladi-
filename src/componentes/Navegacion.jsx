@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MapPin, Bus, ArrowLeftRight } from 'lucide-react';
+import logoPladi from '../assets/logo-pladi.png';
 
 function hayCampoDeTexto() {
   let elemento = document.activeElement;
@@ -18,6 +19,7 @@ function hayCampoDeTexto() {
 
 export default function Navegacion({ seccionActiva, onCambiarSeccion }) {
 
+  
   const [escribiendo, setEscribiendo] = useState(false);
 
   useEffect(() => {
@@ -27,6 +29,8 @@ export default function Navegacion({ seccionActiva, onCambiarSeccion }) {
       clearTimeout(temporizador);
       setEscribiendo(hayCampoDeTexto());
     }
+
+
     function alSoltarCampo() {
       clearTimeout(temporizador);
       temporizador = setTimeout(() => setEscribiendo(hayCampoDeTexto()), 100);
@@ -40,6 +44,10 @@ export default function Navegacion({ seccionActiva, onCambiarSeccion }) {
       document.removeEventListener('focusout', alSoltarCampo);
     };
   }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('escribiendo', escribiendo);
+  }, [escribiendo]);
 
   let claseNav = 'nav';
   if (escribiendo) {
@@ -65,9 +73,7 @@ export default function Navegacion({ seccionActiva, onCambiarSeccion }) {
   return (
     <nav className={claseNav}>
 
-      <div className="nav__marca">
-        PLADI
-      </div>
+      <img className="nav__marca" src={logoPladi} alt="PLADI" draggable="false" />
 
       <div className="nav__lista">
 
