@@ -16,16 +16,48 @@ const REFERENCIAS_B = [
   [66, 1670], [68, 1946], [69, 2094], [70, 2212], [71, 2367], [72, 2506],
 ];
 
-/*
-  Diagonales del casco.
-  En el sistema (p, q) de la ciudad (p: a lo largo del eje B, q: a lo largo del eje A) las diagonales forman
-  45° con las calles, así que cada una es una recta:
-    sentido  1:   q - p = c     (la 73 y la 79)
-    sentido -1:   q + p = c     (la 74 y la 80)
-  "c" y el tramo que cubre cada una (desde/hasta: metros a lo largo de la diagonal) se calcularon a partir de
-  las paradas de colectivo que están sobre cada diagonal (el desvío típico es de unos 10 a 15 m).
-  La 75, la 76, la 77 y la 78 no tienen paradas suficientes para ubicarlas, así que por ahora no se pueden buscar.
-*/
+const BANDAS_P = [
+  [
+    [72, 2506], [73, 2681], [74, 2785], [75, 2892], [76, 2986], [77, 3116], [78, 3241],
+    [80, 3521], [82, 3793], [83, 3967], [85, 4195], [87, 4406], [88, 4479], [90, 4653],
+    [92, 4908], [94, 5113], [96, 5310], [98, 5513],
+  ],
+  [
+    [495, -7441], [497, -7245], [499, -7010], [502, -6709], [503, -6570], [504, -6375], [505, -6291],
+    [506, -6124], [507, -6013], [508, -5872], [510, -5590], [511, -5447], [512, -5312], [513, -5177],
+    [514, -5025], [516, -4754], [517, -4603], [518, -4493], [520, -4203], [521, -4074], [522, -3933],
+    [523, -3789], [524, -3662], [525, -3518], [526, -3365], [527, -3200], [528, -3093], [529, -2951],
+    [530, -2801], [532, -2600],
+  ],
+  [
+    [600, 5725], [601, 5851], [604, 6235], [606, 6357], [607, 6476], [608, 6614], [609, 6712],
+    [610, 6858], [613, 7164], [614, 7291], [620, 7882], [622, 8124], [628, 8750], [630, 9028],
+    [632, 9175], [633, 9364], [635, 9596], [637, 9801], [641, 10059], [643, 10284], [648, 10878],
+    [649, 11008], [650, 11146], [652, 11322], [655, 11628], [656, 11812], [659, 12008],
+  ],
+];
+
+const BANDAS_Q = [
+  [
+    [115, 1802], [116, 1950], [117, 2094], [118, 2277], [119, 2373], [120, 2497], [121, 2702],
+    [122, 2834], [123, 2976], [124, 3080], [126, 3272], [128, 3504],
+  ],
+  [
+    [131, -2599], [132, -2664], [133, -2866], [135, -3140], [136, -3283], [137, -3421], [139, -3711],
+    [140, -3840], [141, -3979], [143, -4259], [144, -4394], [145, -4552], [146, -4678], [147, -4817],
+    [149, -5103], [151, -5379], [153, -5658], [155, -5935], [157, -6217], [159, -6489], [161, -6777],
+    [163, -7054], [165, -7330], [167, -7603], [169, -7937], [170, -8055], [171, -8197], [173, -8449],
+    [175, -8662], [177, -9005], [179, -9287], [181, -9511], [182, -9688], [183, -9868], [184, -9957],
+    [185, -10127], [187, -10465], [189, -10693], [190, -10811], [191, -11010], [194, -11369], [195, -11501],
+    [197, -11814], [200, -12243], [203, -12613], [205, -12941], [208, -13376], [210, -13718], [212, -13832],
+    [214, -14073], [217, -14437], [220, -14793], [223, -15129], [226, -15480], [229, -15892],
+  ],
+];
+
+const NUMEROS_INESTABLES = [84, 86, 89, 134, 501, 515, 519, 621, 646];
+const SALTO_MAXIMO = 3;
+
+
 const DIAGONALES = {
   73: { sentido: 1, c: -4.2, desde: -3528, hasta: 3485 },
   74: { sentido: -1, c: -25.5, desde: -3516, hasta: 3519 },
@@ -34,7 +66,7 @@ const DIAGONALES = {
 };
 
 const NUMEROS_DIAGONAL = [73, 74, 75, 76, 77, 78, 79, 80];
-const MARGEN_DIAGONAL = 300;   // metros que se toleran más allá de las paradas conocidas de cada diagonal
+const MARGEN_DIAGONAL = 300;  
 
 function esCalleA(n) {
   return n >= 1 && n <= 31;
@@ -67,7 +99,50 @@ function posicionCalleB(numero) {
   return ultima[1];
 }
 
-// De las coordenadas (p, q) de la ciudad a [latitud, longitud]
+function posicionEnBandas(bandas, numero) {
+  if (NUMEROS_INESTABLES.includes(numero)) {
+    return null;
+  }
+
+  for (let i = 0; i < bandas.length; i++) {
+    let banda = bandas[i];
+
+    for (let j = 0; j < banda.length; j++) {
+      if (banda[j][0] === numero) {
+        return banda[j][1];
+      }
+      if (banda[j][0] > numero) {
+        if (j === 0) {
+          break;
+        }
+        let anterior = banda[j - 1];
+        let siguiente = banda[j];
+        if (siguiente[0] - anterior[0] > SALTO_MAXIMO) {
+          return null;
+        }
+        let fraccion = (numero - anterior[0]) / (siguiente[0] - anterior[0]);
+        return anterior[1] + fraccion * (siguiente[1] - anterior[1]);
+      }
+    }
+  }
+  return null;
+}
+
+function posicionP(numero) {
+  if (esCalleB(numero)) {
+    return posicionCalleB(numero);
+  }
+  return posicionEnBandas(BANDAS_P, numero);
+}
+
+function posicionQ(numero) {
+  if (esCalleA(numero)) {
+    return ORIGEN_A + SEPARACION_A * numero;
+  }
+  return posicionEnBandas(BANDAS_Q, numero);
+}
+
+
 function puntoDePQ(p, q) {
   let x = p * EJE_B[0] + q * EJE_A[0];
   let y = p * EJE_B[1] + q * EJE_A[1];
@@ -83,10 +158,6 @@ function posicionEsquina(calleA, calleB) {
 }
 
 
-/* ---------- Cruces con diagonales ---------- */
-
-// Cada calle (o diagonal) se representa como una recta en el sistema (p, q):
-//   calle B: p constante   |   calle A: q constante   |   diagonal: q -/+ p = c
 function curvaDeCalle(numero, esDiagonal) {
   if (esDiagonal) {
     let diagonal = DIAGONALES[numero];
@@ -95,11 +166,13 @@ function curvaDeCalle(numero, esDiagonal) {
     }
     return { tipo: 'diagonal', sentido: diagonal.sentido, c: diagonal.c, desde: diagonal.desde, hasta: diagonal.hasta };
   }
-  if (esCalleA(numero)) {
-    return { tipo: 'q', valor: ORIGEN_A + SEPARACION_A * numero };
+  let q = posicionQ(numero);
+  if (q !== null) {
+    return { tipo: 'q', valor: q };
   }
-  if (esCalleB(numero)) {
-    return { tipo: 'p', valor: posicionCalleB(numero) };
+  let p = posicionP(numero);
+  if (p !== null) {
+    return { tipo: 'p', valor: p };
   }
   return null;
 }
@@ -111,7 +184,7 @@ function etiquetaCalle(numero, esDiagonal) {
   return 'calle ' + numero;
 }
 
-// Punto donde se cruzan dos calles, en (p, q). Devuelve { p, q } o { error }
+
 function cruzarCurvas(uno, otro) {
   let p;
   let q;
@@ -145,7 +218,7 @@ function cruzarCurvas(uno, otro) {
     q = conQ.valor;
   }
 
-  // el cruce tiene que estar dentro del tramo que cubre cada diagonal
+  
   let curvas = [uno, otro];
   for (let i = 0; i < curvas.length; i++) {
     let curva = curvas[i];
@@ -207,28 +280,37 @@ function normalizar(texto) {
   t = t.replace(/[,;.()]/g, ' ');
   t = t.replace(/([a-z])(\d)/g, '$1 $2');                   
   t = t.replace(/(\d)([a-z])/g, '$1 $2');                  
-  t = t.replace(/\b(?:diagonal|diag|dg)\s*(\d+)\b/g, ' d$1 ');                   // "diagonal 74" -> "d74"
+  t = t.replace(/\b(?:diagonal|diag|dg)\s*(\d+)\b/g, ' d$1 ');                   
+  t = t.replace(/\b(?:calles|calle|avenida|avda|av)\s*(7[3-9]|80)\b/g, ' c$1 ');
   t = t.replace(/\b(calles|calle|avenida|avda|av|diagonal|diag|dg)\b/g, ' ');
   t = t.replace(/^\s*(esquina|esq)\b/, ' ');
   t = t.replace(/\s+/g, ' ').trim();
   return t;
 }
 
-// "74" o "d74" (diagonal). Los números 73 a 80 solos también son diagonales: no hay calles con esos números en el casco
 function leerCalle(token) {
-  let diagonal = token.charAt(0) === 'd';
-  let numero = Number(diagonal ? token.slice(1) : token);
-  if (NUMEROS_DIAGONAL.includes(numero)) {
-    diagonal = true;
-  }
-  return { numero: numero, diagonal: diagonal };
+  let marca = token.charAt(0);
+  let explicita = marca === 'd' || marca === 'c';
+  let numero = Number(explicita ? token.slice(1) : token);
+  return {
+    numero: numero,
+    diagonal: marca === 'd',
+    ambigua: !explicita && NUMEROS_DIAGONAL.includes(numero),
+  };
+}
+
+function crearEsquina(a, b) {
+  return {
+    tipo: 'esquina', a: a.numero, b: b.numero,
+    aDiag: a.diagonal, bDiag: b.diagonal, aAmb: a.ambigua, bAmb: b.ambigua,
+  };
 }
 
 function interpretar(texto, datosParadas) {
   let t = normalizar(texto);
   let m;
 
-  m = t.match(/^(d?\d+) entre (d?\d+) (?:y|e) (d?\d+)$/);
+  m = t.match(/^([dc]?\d+) entre ([dc]?\d+) (?:y|e) ([dc]?\d+)$/);
   if (m) {
     let calle = leerCalle(m[1]);
     let desde = leerCalle(m[2]);
@@ -237,22 +319,18 @@ function interpretar(texto, datosParadas) {
       tipo: 'entre',
       calle: calle.numero, desde: desde.numero, hasta: hasta.numero,
       calleDiag: calle.diagonal, desdeDiag: desde.diagonal, hastaDiag: hasta.diagonal,
+      calleAmb: calle.ambigua, desdeAmb: desde.ambigua, hastaAmb: hasta.ambigua,
     };
   }
 
-  m = t.match(/^(d?\d+) (?:y|e|esq|esquina|con|x) (d?\d+)$/);
+  m = t.match(/^([dc]?\d+) (?:y|e|esq|esquina|con|x) ([dc]?\d+)$/);
   if (m) {
-    let a = leerCalle(m[1]);
-    let b = leerCalle(m[2]);
-    return { tipo: 'esquina', a: a.numero, b: b.numero, aDiag: a.diagonal, bDiag: b.diagonal };
+    return crearEsquina(leerCalle(m[1]), leerCalle(m[2]));
   }
 
-  // "diagonal 74 50": dos números seguidos y uno de los dos es una diagonal escrita con la palabra
-  m = t.match(/^(d?\d+) (d?\d+)$/);
-  if (m && (m[1].charAt(0) === 'd' || m[2].charAt(0) === 'd')) {
-    let a = leerCalle(m[1]);
-    let b = leerCalle(m[2]);
-    return { tipo: 'esquina', a: a.numero, b: b.numero, aDiag: a.diagonal, bDiag: b.diagonal };
+  m = t.match(/^([dc]?\d+) ([dc]?\d+)$/);
+  if (m && (/^[dc]/.test(m[1]) || /^[dc]/.test(m[2]))) {
+    return crearEsquina(leerCalle(m[1]), leerCalle(m[2]));
   }
 
   m = t.match(/^(\d+) (?:n|nro|num|numero|al|altura|casa) (\d+)$/);
@@ -266,13 +344,10 @@ function interpretar(texto, datosParadas) {
     let segundo = Number(m[2]);
 
     if (segundo < 100) {
-      return {
-        tipo: 'esquina', a: primero, b: segundo,
-        aDiag: NUMEROS_DIAGONAL.includes(primero), bDiag: NUMEROS_DIAGONAL.includes(segundo),
-      };
+      return crearEsquina(leerCalle(m[1]), leerCalle(m[2]));
     }
     if (buscarParadaEnEsquina(primero, segundo, datosParadas) !== null) {
-      return { tipo: 'esquina', a: primero, b: segundo };
+      return crearEsquina(leerCalle(m[1]), leerCalle(m[2]));
     }
     return { tipo: 'altura', calle: primero, altura: segundo };
   }
@@ -316,13 +391,97 @@ function buscarParadaEnEsquina(a, b, datosParadas) {
 }
 
 
+function camposDelPedido(pedido) {
+  if (pedido.tipo === 'esquina') {
+    return ['a', 'b'];
+  }
+  if (pedido.tipo === 'entre') {
+    return ['calle', 'desde', 'hasta'];
+  }
+  return [];
+}
+
+function prefiereDiagonal(pedido, campos, campo) {
+  for (let i = 0; i < campos.length; i++) {
+    let otro = campos[i];
+    if (otro === campo) {
+      continue;
+    }
+    if (pedido[otro + 'Diag'] || pedido[otro + 'Amb'] || pedido[otro] <= 72) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function bitsEncendidos(numero) {
+  let cantidad = 0;
+  while (numero > 0) {
+    cantidad = cantidad + (numero & 1);
+    numero = numero >> 1;
+  }
+  return cantidad;
+}
+
+function crearVariantes(pedido) {
+  let campos = camposDelPedido(pedido);
+  let ambiguos = [];
+  for (let i = 0; i < campos.length; i++) {
+    if (pedido[campos[i] + 'Amb']) {
+      ambiguos.push(campos[i]);
+    }
+  }
+  if (ambiguos.length === 0) {
+    return [pedido];
+  }
+
+  let base = { ...pedido };
+  for (let i = 0; i < ambiguos.length; i++) {
+    base[ambiguos[i] + 'Diag'] = prefiereDiagonal(pedido, campos, ambiguos[i]);
+  }
+
+  let mascaras = [];
+  for (let m = 1; m < Math.pow(2, ambiguos.length); m++) {
+    mascaras.push(m);
+  }
+  mascaras.sort((x, y) => bitsEncendidos(x) - bitsEncendidos(y));
+
+  let variantes = [base];
+  for (let i = 0; i < mascaras.length; i++) {
+    let copia = { ...base };
+    for (let j = 0; j < ambiguos.length; j++) {
+      if ((mascaras[i] >> j) & 1) {
+        copia[ambiguos[j] + 'Diag'] = !base[ambiguos[j] + 'Diag'];
+      }
+    }
+    variantes.push(copia);
+  }
+  return variantes;
+}
+
 export function ubicarDireccion(texto, datosParadas) {
   let pedido = interpretar(texto, datosParadas);
   if (pedido === null) {
     return null;
   }
 
-  // Pedidos donde interviene una diagonal: se resuelven con las rectas de cada calle
+  let variantes = crearVariantes(pedido);
+  let primero = resolverPedido(variantes[0], datosParadas);
+  if (primero !== null && !primero.error) {
+    return primero;
+  }
+
+  for (let i = 1; i < variantes.length; i++) {
+    let otro = resolverPedido(variantes[i], datosParadas);
+    if (otro !== null && !otro.error) {
+      return otro;
+    }
+  }
+  return primero;
+}
+
+function resolverPedido(pedido, datosParadas) {
+
   if (pedido.tipo === 'esquina' && (pedido.aDiag || pedido.bDiag)) {
     let uno = curvaDeCalle(pedido.a, pedido.aDiag);
     let otro = curvaDeCalle(pedido.b, pedido.bDiag);
@@ -369,14 +528,17 @@ export function ubicarDireccion(texto, datosParadas) {
     let a = pedido.a;
     let b = pedido.b;
 
-    if (esCalleA(a) && esCalleB(b)) {
-      return { punto: posicionEsquina(a, b), descripcion: 'esquina de calles ' + a + ' y ' + b };
-    }
-    if (esCalleB(a) && esCalleA(b)) {
-      return { punto: posicionEsquina(b, a), descripcion: 'esquina de calles ' + a + ' y ' + b };
-    }
-    if ((esCalleA(a) && esCalleA(b)) || (esCalleB(a) && esCalleB(b))) {
-      return { error: 'Las calles ' + a + ' y ' + b + ' son paralelas: no se cruzan.' };
+    let curvaA = curvaDeCalle(a, false);
+    let curvaB = curvaDeCalle(b, false);
+
+    if (curvaA !== null && curvaB !== null) {
+      let cruce = cruzarCurvas(curvaA, curvaB);
+      if (!cruce.error) {
+        return { punto: puntoDePQ(cruce.p, cruce.q), descripcion: 'esquina de calles ' + a + ' y ' + b };
+      }
+      if ((esCalleA(a) || esCalleB(a)) && (esCalleA(b) || esCalleB(b))) {
+        return { error: 'Las calles ' + a + ' y ' + b + ' son paralelas: no se cruzan.' };
+      }
     }
 
     let parada = buscarParadaEnEsquina(a, b, datosParadas);
@@ -391,12 +553,15 @@ export function ubicarDireccion(texto, datosParadas) {
     let desde = pedido.desde;
     let hasta = pedido.hasta;
 
+    let base = curvaDeCalle(calle, false);
+    let primera = curvaDeCalle(desde, false);
+    let segunda = curvaDeCalle(hasta, false);
+
     let transversalesOk = false;
-    if (esCalleA(calle) && esCalleB(desde) && esCalleB(hasta)) {
-      transversalesOk = true;
-    }
-    if (esCalleB(calle) && esCalleA(desde) && esCalleA(hasta)) {
-      transversalesOk = true;
+    if (base !== null && primera !== null && segunda !== null) {
+      if (primera.tipo !== base.tipo && segunda.tipo !== base.tipo) {
+        transversalesOk = true;
+      }
     }
     if (!transversalesOk) {
       if (esCalleA(calle) || esCalleB(calle)) {
@@ -405,9 +570,9 @@ export function ubicarDireccion(texto, datosParadas) {
       return null;
     }
 
-    let inicio = puntoEnCalle(calle, desde);
-    let fin = puntoEnCalle(calle, hasta);
-    let medio = [(inicio[0] + fin[0]) / 2, (inicio[1] + fin[1]) / 2];
+    let inicio = cruzarCurvas(base, primera);
+    let fin = cruzarCurvas(base, segunda);
+    let medio = puntoDePQ((inicio.p + fin.p) / 2, (inicio.q + fin.q) / 2);
 
     return { punto: medio, descripcion: 'calle ' + calle + ' entre ' + desde + ' y ' + hasta };
   }
@@ -421,11 +586,7 @@ export function ubicarDireccion(texto, datosParadas) {
 
     let cuadra = ubicarAltura(calle, pedido.altura);
     if (cuadra === null) {
-      return {
-        error:
-          'La altura ' + pedido.altura + ' de la calle ' + calle + ' queda fuera del casco urbano. ' +
-          'Si querías una esquina, escribí por ejemplo "' + calle + ' y ' + pedido.altura + '".',
-      };
+      return null;
     }
 
     let punto = puntoEnCalle(calle, cuadra.primera + cuadra.avance);
@@ -441,7 +602,7 @@ export function ubicarDireccion(texto, datosParadas) {
   return null;
 }
 
-const AVENIDAS = [1, 7, 13, 19, 25, 31, 32, 38, 44, 51, 53, 60, 66, 72];
+const AVENIDAS = [1, 7, 13, 19, 25, 31, 32, 38, 44, 51, 53, 60, 66, 72, 122, 137, 520, 532];
 
 function nombreDeCalle(numero) {
   if (AVENIDAS.includes(numero)) {
@@ -480,7 +641,109 @@ function redondearAltura(altura) {
   return Math.round(altura / 10) * 10;
 }
 
-export function direccionDePunto(punto) {
+let respaldoGuardado = null;
+
+function puntosDeRespaldo(datosParadas) {
+  let resultado = [];
+
+  for (let i = 0; i < datosParadas.paradas.length; i++) {
+    let parada = datosParadas.paradas[i];
+    let n1 = numeroDeCalle(parada.calle[0]);
+    let n2 = numeroDeCalle(parada.calle[1]);
+    if (n1 === null || n2 === null) {
+      continue;
+    }
+
+    let dx = (parada.coords[1] - LNG_CENTRO) * METROS_POR_GRADO_LNG;
+    let dy = (parada.coords[0] - LAT_CENTRO) * METROS_POR_GRADO_LAT;
+    let p = dx * EJE_B[0] + dy * EJE_B[1];
+    let q = dx * EJE_A[0] + dy * EJE_A[1];
+
+    let pares = [[n1, n2], [n2, n1]];
+    for (let j = 0; j < pares.length; j++) {
+      let qEsperado = posicionQ(pares[j][0]);
+      let pEsperado = posicionP(pares[j][1]);
+      if (qEsperado === null || pEsperado === null) {
+        continue;
+      }
+      if (Math.sqrt((p - pEsperado) * (p - pEsperado) + (q - qEsperado) * (q - qEsperado)) <= 90) {
+        resultado.push([p, q]);
+        break;
+      }
+    }
+  }
+  return resultado;
+}
+
+function hayParadasCerca(p, q, datosParadas) {
+  if (!datosParadas) {
+    return false;
+  }
+  if (respaldoGuardado === null || respaldoGuardado.datos !== datosParadas) {
+    respaldoGuardado = { datos: datosParadas, puntos: puntosDeRespaldo(datosParadas) };
+  }
+
+  let puntos = respaldoGuardado.puntos;
+  for (let i = 0; i < puntos.length; i++) {
+    let dp = p - puntos[i][0];
+    let dq = q - puntos[i][1];
+    if (dp * dp + dq * dq <= 500 * 500) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function lineaMasCercana(lineas, metros) {
+  let numero = null;
+  let distancia = Infinity;
+
+  for (let i = 0; i < lineas.length; i++) {
+    let d = Math.abs(lineas[i][1] - metros);
+    if (d < distancia) {
+      distancia = d;
+      numero = lineas[i][0];
+    }
+  }
+  return { numero: numero, distancia: distancia };
+}
+
+function agregarLineas(destino, bandas) {
+  for (let i = 0; i < bandas.length; i++) {
+    for (let j = 0; j < bandas[i].length; j++) {
+      if (!NUMEROS_INESTABLES.includes(bandas[i][j][0])) {
+        destino.push(bandas[i][j]);
+      }
+    }
+  }
+}
+
+function nombreFueraDelCasco(p, q, datosParadas) {
+  let lineasQ = [];
+  for (let n = 1; n <= 31; n++) {
+    lineasQ.push([n, ORIGEN_A + SEPARACION_A * n]);
+  }
+  agregarLineas(lineasQ, BANDAS_Q);
+
+  let lineasP = [];
+  for (let n = 32; n <= 72; n++) {
+    lineasP.push([n, posicionCalleB(n)]);
+  }
+  agregarLineas(lineasP, BANDAS_P);
+
+  let cercanaQ = lineaMasCercana(lineasQ, q);
+  let cercanaP = lineaMasCercana(lineasP, p);
+
+  if (cercanaQ.distancia > 35 || cercanaP.distancia > 35) {
+    return null;
+  }
+  if (!hayParadasCerca(p, q, datosParadas)) {
+    return null;
+  }
+  return nombreDeCalle(cercanaQ.numero) + ' y ' + nombreDeCalle(cercanaP.numero);
+}
+
+export function direccionDePunto(punto, datosParadas) {
   let dx = (punto[1] - LNG_CENTRO) * METROS_POR_GRADO_LNG;
   let dy = (punto[0] - LAT_CENTRO) * METROS_POR_GRADO_LAT;
 
@@ -491,7 +754,7 @@ export function direccionDePunto(punto) {
   let b = numeroCalleB(p);                 
 
   if (b === null || a < 0.5 || a > 31.5) {
-    return null;
+    return nombreFueraDelCasco(p, q, datosParadas);
   }
   if (a < 1) {
     a = 1;
@@ -512,7 +775,7 @@ export function direccionDePunto(punto) {
 
   if (metrosA <= metrosB) {
     if (b >= 52 && b < 53) {
-      return nombreDeCalle(calleA) + ' entre 52 y 53';   // en esa cuadra no hay numeración
+      return nombreDeCalle(calleA) + ' entre 52 y 53';  
     }
 
     let primera = Math.floor(b);

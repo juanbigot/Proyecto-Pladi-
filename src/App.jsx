@@ -1,14 +1,37 @@
-import { useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Polyline } from 'react-leaflet';
+import { useState, useMemo, useEffect } from 'react';
+import { MapContainer, TileLayer, Polyline, CircleMarker } from 'react-leaflet';
 import Navegacion from './componentes/Navegacion.jsx';
 import Buscador from './componentes/Buscador.jsx';
 import MarkersVisibles from './componentes/MarkersVisibles.jsx';
-import CapaRecorridos from './componentes/CapaRecorridos.jsx';
+import CapaRecorridos, { separarPorSentido } from './componentes/CapaRecorridos.jsx';
 import CapaViaje from './componentes/CapaViaje.jsx';
 import datosParadas from './ubicacionParadas.json';
 import './App.css';
 
 const centroLaPlata = [-34.9214, -57.9544];
+
+const ZOOM_PARADAS = 16;
+
+const ZOOM_RECORRIDO = 13;
+
+const ZOOM_INICIAL = 15;
+
+function seccionInicial() {
+  if (window.matchMedia('(min-width: 1000px)').matches) {
+    return 'direccion';
+  }
+  return 'paradas';
+}
+
+const ESTILO_MI_UBICACION = {
+  color: '#ffffff',
+  weight: 3,
+  fillColor: '#16a34a',
+  fillOpacity: 1,
+  interactive: false,
+};
+
+const OPCIONES_MI_UBICACION = { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 };
 
 function crearLineasVisibles(lineas) {
   let resultado = {};
@@ -20,9 +43,12 @@ function crearLineasVisibles(lineas) {
 
 function App() {
 
-  const [seccionActiva, setSeccionActiva] = useState('recorrido');
+  const [seccionActiva, setSeccionActiva] = useState(seccionInicial);
+
+  const [zoomInicial] = useState(() => (seccionActiva === 'paradas' ? ZOOM_PARADAS : ZOOM_INICIAL));
   const [lineaSeleccionada, setLineaSeleccionada] = useState(null);
   const [ramalesOcultos, setRamalesOcultos] = useState({});
+  const [sentidoRecorrido, setSentidoRecorrido] = useState('ida');
   const [origen, setOrigen] = useState(null);
   const [destino, setDestino] = useState(null);
   const [viajeElegido, setViajeElegido] = useState(null);
@@ -30,11 +56,92 @@ function App() {
   const [paradaSeleccionada, setParadaSeleccionada] = useState(null);
   const [banderaMostrada, setBanderaMostrada] = useState(null);
   const [lineasVisibles, setLineasVisibles] = useState(crearLineasVisibles(datosParadas.lineas));
+  const [miUbicacion, setMiUbicacion] = useState(null);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      return;
+    }
+
+    let idSeguimiento = null;
+
+    function alRecibirUbicacion(posicion) {
+      setMiUbicacion([posicion.coords.latitude, posicion.coords.longitude]);
+    }
+
+    function alFallarUbicacion(error) {
+      if (error && error.code === 1) {
+        setMiUbicacion(null);
+        if (idSeguimiento !== null) {
+          navigator.geolocation.clearWatch(idSeguimiento);
+          idSeguimiento = null;
+        }
+      }
+    }
+
+    idSeguimiento = navigator.geolocation.watchPosition(
+      alRecibirUbicacion,
+      alFallarUbicacion,
+      OPCIONES_MI_UBICACION
+    );
+
+    return () => {
+      if (idSeguimiento !== null) {
+        navigator.geolocation.clearWatch(idSeguimiento);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mapa === null) {
+      return;
+    }
+
+    if (seccionActiva === 'paradas' && banderaMostrada === null && mapa.getZoom() < ZOOM_PARADAS) {
+      mapa.setZoom(ZOOM_PARADAS);
+    }
+
+    if (seccionActiva === 'recorrido' && mapa.getZoom() > ZOOM_RECORRIDO) {
+      mapa.setZoom(ZOOM_RECORRIDO);
+    }
+  }, [seccionActiva]);
 
   function elegirLinea(abbr) {
     setLineaSeleccionada(abbr);
     setRamalesOcultos({});
+    setSentidoRecorrido('ida');
   }
+
+  const sentidosLinea = useMemo(() => {
+    return separarPorSentido(datosParadas, lineaSeleccionada);
+  }, [lineaSeleccionada]);
+
+  function cambiarSentido(nuevoSentido) {
+    if (nuevoSentido === sentidoRecorrido) {
+      return;
+    }
+
+    let nuevos = { ...ramalesOcultos };
+    let destino = sentidosLinea[nuevoSentido];
+
+    for (let i = 0; i < destino.length; i++) {
+      let pareja = sentidosLinea.parejas.get(destino[i].id);
+      if (!pareja) {
+        continue;
+      }
+      if (ramalesOcultos[pareja.id] === true) {
+        nuevos[destino[i].id] = true;
+      } else {
+        delete nuevos[destino[i].id];
+      }
+    }
+
+    setRamalesOcultos(nuevos);
+    setSentidoRecorrido(nuevoSentido);
+  }
+
+  const mostrarBotonSentido =
+    seccionActiva === 'recorrido' && sentidosLinea.ida.length + sentidosLinea.vuelta.length > 0;
 
   const paradasFiltradas = useMemo(() => {
 
@@ -70,12 +177,12 @@ function App() {
   }, [paradasFiltradas, paradaSeleccionada]);
 
   return (
-    <div className="app-raiz">
+    <div className={mostrarBotonSentido ? 'app-raiz app-raiz--con-sentido' : 'app-raiz'}>
 
       <MapContainer
         ref={setMapa}
         center={centroLaPlata}
-        zoom={15}
+        zoom={zoomInicial}
         zoomControl={false}
         style={{ height: '100%', width: '100%' }}
       >
@@ -99,7 +206,11 @@ function App() {
         )}
 
         {seccionActiva === 'recorrido' && (
-          <CapaRecorridos datosParadas={datosParadas} lineaSeleccionada={lineaSeleccionada} ramalesOcultos={ramalesOcultos} />
+          <CapaRecorridos ramales={sentidosLinea[sentidoRecorrido]} ramalesOcultos={ramalesOcultos} />
+        )}
+
+        {miUbicacion !== null && (
+          <CircleMarker center={miUbicacion} radius={8} pathOptions={ESTILO_MI_UBICACION} />
         )}
 
       </MapContainer>
@@ -108,6 +219,8 @@ function App() {
         seccionActiva={seccionActiva}
         datosParadas={datosParadas}
         lineaSeleccionada={lineaSeleccionada}
+        sentidosLinea={sentidosLinea}
+        sentidoRecorrido={sentidoRecorrido}
         onSeleccionarLinea={elegirLinea}
         ramalesOcultos={ramalesOcultos}
         onCambiarRamalesOcultos={setRamalesOcultos}
@@ -124,6 +237,28 @@ function App() {
         onCambiarDestino={setDestino}
         onElegirViaje={setViajeElegido}
       />
+
+      {mostrarBotonSentido && (
+        <div className="sentido-flotante">
+          <div className="toggle-sentido">
+            <button
+              type="button"
+              className={sentidoRecorrido === 'ida' ? 'boton-sentido boton-sentido--activo' : 'boton-sentido'}
+              onClick={() => cambiarSentido('ida')}
+            >
+              Ida
+            </button>
+            <button
+              type="button"
+              className={sentidoRecorrido === 'vuelta' ? 'boton-sentido boton-sentido--activo' : 'boton-sentido'}
+              onClick={() => cambiarSentido('vuelta')}
+              disabled={sentidosLinea.vuelta.length === 0}
+            >
+              Vuelta
+            </button>
+          </div>
+        </div>
+      )}
 
       <Navegacion
         seccionActiva={seccionActiva}
