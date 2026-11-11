@@ -123,12 +123,45 @@ function penalizacionPorRamal(a, b) {
   return PENALIZACION_RAMAL_DISTINTO;
 }
 
+function claveDeOrden(bandera) {
+  let texto = bandera.nombre.toUpperCase();
+  texto = texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  texto = texto.replace(/[\[\]]/g, ' ');
+  return texto.replace(/^[^A-Z0-9]+/, '');
+}
+
+function compararNatural(a, b) {
+  let partesA = a.match(/\d+|[A-Z]+|[^A-Z\d]+/g) || [];
+  let partesB = b.match(/\d+|[A-Z]+|[^A-Z\d]+/g) || [];
+  let largo = Math.min(partesA.length, partesB.length);
+
+  for (let i = 0; i < largo; i++) {
+    let x = partesA[i];
+    let y = partesB[i];
+    if (x === y) {
+      continue;
+    }
+    if (/^\d/.test(x) && /^\d/.test(y)) {
+      let diferencia = Number(x) - Number(y);
+      if (diferencia !== 0) {
+        return diferencia;
+      }
+      continue;
+    }
+    if (x < y) {
+      return -1;
+    }
+    return 1;
+  }
+  return partesA.length - partesB.length;
+}
+
 let sentidosGuardados = new Map();
 
 
 export function separarPorSentido(datosParadas, abbr) {
   if (abbr === null) {
-    return { ida: [], vuelta: [], parejas: new Map() };
+    return { ida: [], vuelta: [], parejas: new Map(), colores: new Map() };
   }
 
   let guardado = sentidosGuardados.get(abbr);
@@ -143,7 +176,7 @@ export function separarPorSentido(datosParadas, abbr) {
     }
   }
   if (linea === null) {
-    return { ida: [], vuelta: [], parejas: new Map() };
+    return { ida: [], vuelta: [], parejas: new Map(), colores: new Map() };
   }
 
   let ramales = [];
@@ -201,17 +234,28 @@ export function separarPorSentido(datosParadas, abbr) {
     }
   }
 
-  let resultado = { ida: [], vuelta: [], parejas: parejas };
-
+  let unidades = [];
   for (let i = 0; i < ramales.length; i++) {
-    if (sentidos[i] === 'ida' && parejas.has(ramales[i].id)) {
-      resultado.ida.push(ramales[i]);
-      resultado.vuelta.push(parejas.get(ramales[i].id));
+    if (sentidos[i] === 'ida') {
+      let pareja = parejas.get(ramales[i].id);
+      unidades.push({ ida: ramales[i], vuelta: pareja ? pareja : null });
     }
   }
-  for (let i = 0; i < ramales.length; i++) {
-    if (sentidos[i] === 'ida' && !parejas.has(ramales[i].id)) {
-      resultado.ida.push(ramales[i]);
+  unidades.sort(function (a, b) {
+    let orden = compararNatural(claveDeOrden(a.ida), claveDeOrden(b.ida));
+    if (orden !== 0) {
+      return orden;
+    }
+    return compararNatural(String(a.ida.id).toUpperCase(), String(b.ida.id).toUpperCase());
+  });
+
+  let resultado = { ida: [], vuelta: [], parejas: parejas, colores: new Map() };
+  for (let k = 0; k < unidades.length; k++) {
+    resultado.ida.push(unidades[k].ida);
+    resultado.colores.set(unidades[k].ida.id, k);
+    if (unidades[k].vuelta !== null) {
+      resultado.vuelta.push(unidades[k].vuelta);
+      resultado.colores.set(unidades[k].vuelta.id, k);
     }
   }
 
@@ -238,7 +282,7 @@ export function parejaDeSentido(datosParadas, bandera) {
 }
 
 
-function CapaRecorridos({ ramales, ramalesOcultos }) {
+function CapaRecorridos({ ramales, ramalesOcultos, colores }) {
   return (
     <>
       {ramales.map((bandera, posicion) => {
@@ -246,11 +290,16 @@ function CapaRecorridos({ ramales, ramalesOcultos }) {
           return null;
         }
 
+        let indiceColor = posicion;
+        if (colores && colores.has(bandera.id)) {
+          indiceColor = colores.get(bandera.id);
+        }
+
         return (
           <Polyline
             key={bandera.id}
             positions={bandera.recorrido}
-            pathOptions={{ color: colorDeRamal(posicion), weight: 4, opacity: 0.85 }}
+            pathOptions={{ color: colorDeRamal(indiceColor), weight: 4, opacity: 0.85 }}
           >
             <Popup>{bandera.nombre}</Popup>
           </Polyline>

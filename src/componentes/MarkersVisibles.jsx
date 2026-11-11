@@ -1,7 +1,46 @@
-import { useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMap, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+import iconoParadaUrl from '../assets/marker-parada.svg';
 
-const altura_Minima = 15;
+export const ZOOM_MINIMO_PARADAS = 15;
+
+const ICONO_PARADA = L.icon({
+  iconUrl: iconoParadaUrl,
+  iconSize: [26, 52],
+  iconAnchor: [13, 52],
+  popupAnchor: [0, -50],
+});
+
+
+const MarkerParada = memo(function MarkerParada({ parada, onElegir }) {
+
+  const popupEstabaAbierto = useRef(false);
+
+  const eventHandlers = useMemo(() => ({
+    preclick: (evento) => {
+      popupEstabaAbierto.current = evento.target.isPopupOpen();
+    },
+    click: () => {
+      if (popupEstabaAbierto.current) {
+        popupEstabaAbierto.current = false;
+        onElegir(parada);
+      }
+    },
+  }), [parada, onElegir]);
+
+  return (
+    <Marker position={parada.coords} icon={ICONO_PARADA} eventHandlers={eventHandlers}>
+      <Popup>
+        <div onClick={() => onElegir(parada)} style={{ cursor: 'pointer' }}>
+          <strong>Parada {parada.id}</strong>
+          <br />
+          {parada.calle.join(' y ')}
+        </div>
+      </Popup>
+    </Marker>
+  );
+});
 
 function MarkersVisibles({ paradas, onElegirParada }) {
 
@@ -10,7 +49,7 @@ function MarkersVisibles({ paradas, onElegirParada }) {
 
   function actualizarParadas() {
 
-    if (mapa.getZoom() < altura_Minima) {
+    if (mapa.getZoom() < ZOOM_MINIMO_PARADAS) {
       setParadasVisibles([]);
       return;
     }
@@ -30,40 +69,44 @@ function MarkersVisibles({ paradas, onElegirParada }) {
     setParadasVisibles(visibles);
   }
 
-  function elegirParada(parada) {
+  const elegirParada = useCallback((parada) => {
     mapa.closePopup();
-    onElegirParada(parada);  
-  }
+    onElegirParada(parada);
+  }, [mapa, onElegirParada]);
 
   useEffect(() => {
 
     actualizarParadas();
 
     mapa.on('moveend', actualizarParadas);
-    mapa.on('zoomend', actualizarParadas);
 
     return () => {
       mapa.off('moveend', actualizarParadas);
-      mapa.off('zoomend', actualizarParadas);
     };
 
   }, [paradas]);
 
+  useEffect(() => {
+
+    function alTocarAfuera(evento) {
+      let elemento = evento.target;
+      if (!elemento || !elemento.closest || !elemento.closest('.leaflet-container')) {
+        mapa.closePopup();
+      }
+    }
+
+    document.addEventListener('pointerdown', alTocarAfuera);
+
+    return () => {
+      document.removeEventListener('pointerdown', alTocarAfuera);
+    };
+
+  }, [mapa]);
+
   return (
     <>
       {paradasVisibles.map((parada) => (
-        <Marker
-          key={parada.id}
-          position={parada.coords}
-        >
-          <Popup>
-            <div onClick={() => elegirParada(parada)} style={{ cursor: 'pointer' }}>
-              <strong>Parada {parada.id}</strong>
-              <br />
-              {parada.calle.join(' y ')}
-            </div>
-          </Popup>
-        </Marker>
+        <MarkerParada key={parada.id} parada={parada} onElegir={elegirParada} />
       ))}
     </>
   );

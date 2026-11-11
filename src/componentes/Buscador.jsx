@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flag, Clock, MapPin } from 'lucide-react';
 import { buscarViajes } from '../buscarViajes.js';
 import { ubicarDireccion, direccionDePunto } from '../ubicarDireccion.js';
+import { buscarLugares } from '../buscarLugar.js';
 import { colorDeRamal, parejaDeSentido } from './CapaRecorridos.jsx';
 
 const IconoCorazon = ({ relleno, color }) => (
@@ -18,7 +19,7 @@ const IconoLupa = ({ color }) => (
 );
 
 const IconoChevron = ({ arriba }) => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#666666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0d9be0" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points={arriba ? '6 15 12 9 18 15' : '6 9 12 15 18 9'}></polyline>
   </svg>
 );
@@ -323,12 +324,51 @@ function nombreParada(parada) {
 }
 
 const MENSAJE_ERROR_UBICACION = 'Hubo un fallo en la redacción de la ubicación';
+const MENSAJE_BUSCANDO = 'Buscando...';
 
-const OPCIONES_UBICACION_ACTUAL = { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 };
+const ESPERA_AL_SOLTAR_CAMPO = 350;
+
+const OPCIONES_UBICACION_RAPIDA = { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 };
+const OPCIONES_UBICACION_PRECISA = { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 };
+
+const TIEMPO_MAXIMO_RED = 8000;
+
+async function obtenerPermisoUbicacion() {
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) {
+      return null;
+    }
+    return await navigator.permissions.query({ name: 'geolocation' });
+  } catch (error) {
+    return null;
+  }
+}
+
+async function consultarPermisoUbicacion() {
+  let permiso = await obtenerPermisoUbicacion();
+  if (permiso === null) {
+    return 'desconocido';
+  }
+  return permiso.state;
+}
+
+async function pedirJson(url) {
+  let controlador = new AbortController();
+  let temporizador = setTimeout(() => controlador.abort(), TIEMPO_MAXIMO_RED);
+  try {
+    let respuesta = await fetch(url, { signal: controlador.signal });
+    if (!respuesta.ok) {
+      throw new Error('HTTP ' + respuesta.status);
+    }
+    return await respuesta.json();
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
 
 function mensajeDeErrorDeUbicacion(error) {
   if (error && error.code === 1) {
-    return 'No diste permiso para usar tu ubicación. Podés habilitarlo en los ajustes del navegador.';
+    return 'No diste permiso para usar tu ubicación. Para usarla, activá "Ubicación" en los permisos del sitio (el candado o los ajustes junto a la dirección del navegador) y volvé a intentar.';
   }
   if (error && error.code === 3) {
     return 'Tardó demasiado en obtener tu ubicación. Probá de nuevo.';
@@ -336,27 +376,11 @@ function mensajeDeErrorDeUbicacion(error) {
   return 'No se pudo obtener tu ubicación.';
 }
 
-async function buscarDireccion(texto) {
-  let url =
-    'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar' +
-    '&viewbox=-58.2,-34.7,-57.7,-35.1&bounded=1&q=' +
-    encodeURIComponent(texto + ', La Plata');
-
-  let respuesta = await fetch(url);
-  let datos = await respuesta.json();
-
-  if (datos.length === 0) {
-    return null;
-  }
-  return [parseFloat(datos[0].lat), parseFloat(datos[0].lon)];
-}
-
 async function buscarNombreDePunto(punto) {
   let url =
     'https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&lat=' + punto[0] + '&lon=' + punto[1];
 
-  let respuesta = await fetch(url);
-  let datos = await respuesta.json();
+  let datos = await pedirJson(url);
 
   if (!datos.address || !datos.address.road) {
     return null;
@@ -395,7 +419,7 @@ function useMedia(consulta) {
   return coincide;
 }
 
-function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLinea, sentidoRecorrido, onSeleccionarLinea, mapa, onMostrarBandera, paradaSeleccionada, onElegirParada, lineasVisibles, onCambiarLineasVisibles, ramalesOcultos, onCambiarRamalesOcultos, origen, destino, viajeElegido, onCambiarOrigen, onCambiarDestino, onElegirViaje }) {
+function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLinea, sentidoRecorrido, onSeleccionarLinea, mapa, onMostrarBandera, paradaSeleccionada, onElegirParada, lineasVisibles, onCambiarLineasVisibles, ramalesOcultos, onCambiarRamalesOcultos, origen, destino, viajeElegido, onCambiarOrigen, onCambiarDestino, onElegirViaje, onUbicacionConcedida }) {
 
   const [texto, setTexto] = useState('');
   const [verFavoritos, setVerFavoritos] = useState(false);
@@ -412,36 +436,64 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
   const [desplegable, setDesplegable] = useState(null);
   const [camposConError, setCamposConError] = useState({ origen: false, destino: false });
   const [seleccionandoEnMapa, setSeleccionandoEnMapa] = useState(null);
+  const [opcionesLugar, setOpcionesLugar] = useState(null);
   const esCompu = useMedia('(min-width: 1000px)');
   const esTablet = useMedia('(min-width: 560px) and (max-width: 999px)');
   const esTabletHorizontal = useMedia('(min-width: 560px) and (max-width: 999px) and (orientation: landscape)');
+  const esCelu = useMedia('(max-width: 559px)');
   const [seleccionCentral, setSeleccionCentral] = useState(null);
   const [centro, setCentro] = useState(null);
   const [alturaCentro, setAlturaCentro] = useState(null);
   const tarjetaRef = useRef(null);
   const ultimoPunto = useRef({ origen: null, destino: null });
   const pidiendoUbicacion = useRef(false);
+  const numeroPedidoUbicacion = useRef(0);
+  const numeroBusquedaLugar = useRef({ origen: 0, destino: 0 });
+  const ultimoTextoBuscado = useRef({ origen: '', destino: '' });
+  const temporizadoresSoltar = useRef({ origen: null, destino: null });
   const pidioAlEntrar = useRef(false);
   const origenActual = useRef(origen);
   const destinoActual = useRef(destino);
   const recientesActuales = useRef(recientes);
   const textoOrigenActual = useRef('');
+  const textoDestinoActual = useRef('');
+  const seccionActual = useRef(seccionActiva);
   origenActual.current = origen;
   destinoActual.current = destino;
   recientesActuales.current = recientes;
   textoOrigenActual.current = textoOrigen;
-  const [plegado, setPlegado] = useState(false);
+  textoDestinoActual.current = textoDestino;
+  seccionActual.current = seccionActiva;
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(temporizadoresSoltar.current.origen);
+      clearTimeout(temporizadoresSoltar.current.destino);
+    };
+  }, []);
+  const [plegado, setPlegado] = useState(() => seccionActiva === 'paradas' && esCelu);
 
   useEffect(() => {
     setPlegado(false);
   }, [seccionActiva, paradaSeleccionada, viajeElegido, lineaSeleccionada, verFavoritos]);
 
   useEffect(() => {
+    if (seccionActiva === 'paradas' && esCelu) {
+      setPlegado(true);
+    }
+  }, [seccionActiva]);
+
+  useEffect(() => {
     if (pidioAlEntrar.current) {
       return;
     }
     pidioAlEntrar.current = true;
-    pedirUbicacionActual(false, 'origen', false);
+
+    consultarPermisoUbicacion().then((estado) => {
+      if (estado === 'granted') {
+        pedirUbicacionActual(false, 'origen', false);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -792,14 +844,19 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
     }
   }
 
-  async function buscarPunto(campo, texto) {
+  async function buscarPunto(campo, texto, desdeSoltarCampo) {
     if (texto.trim() === '') {
       return;
     }
 
-    setDesplegable(null);
+    if (!desdeSoltarCampo) {
+      setDesplegable(null);
+    }
+    setOpcionesLugar(null);
 
-    let punto = null;
+    let numero = numeroBusquedaLugar.current[campo] + 1;
+    numeroBusquedaLugar.current[campo] = numero;
+    ultimoTextoBuscado.current[campo] = texto.trim();
 
     let local = ubicarDireccion(texto, datosParadas);
 
@@ -810,32 +867,84 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
     }
 
     if (local !== null) {
-      punto = local.punto;
-    } else {
-      setMensaje('Buscando...');
+      aplicarPunto(campo, local.punto, null, true, desdeSoltarCampo);
+      guardarReciente(ponerMayuscula(local.descripcion), local.punto);
+      return;
+    }
 
-      try {
-        punto = await buscarDireccion(texto);
-      } catch (error) {
+    setMensaje(MENSAJE_BUSCANDO);
+
+    let busqueda;
+    try {
+      busqueda = await buscarLugares(texto, pedirJson);
+    } catch (error) {
+      if (numeroBusquedaLugar.current[campo] === numero) {
         setMensaje(MENSAJE_ERROR_UBICACION);
         marcarError(campo, true);
+      }
+      return;
+    }
+
+    if (numeroBusquedaLugar.current[campo] !== numero) {
+      return;
+    }
+
+    if (busqueda.lugares.length === 0) {
+      setMensaje(MENSAJE_ERROR_UBICACION);
+      marcarError(campo, true);
+      return;
+    }
+
+    if (busqueda.claro) {
+      aplicarPunto(campo, busqueda.lugares[0].punto, null, true, desdeSoltarCampo);
+      guardarReciente(texto.trim(), busqueda.lugares[0].punto);
+      return;
+    }
+
+    setMensaje('');
+    setOpcionesLugar({ campo: campo, lugares: busqueda.lugares });
+  }
+
+  function elegirLugar(campo, lugar) {
+    aplicarPunto(campo, lugar.punto, lugar.nombre, true);
+    guardarReciente(lugar.nombre, lugar.punto);
+  }
+
+  function cancelarBusquedaAlSoltar(campo) {
+    clearTimeout(temporizadoresSoltar.current[campo]);
+    temporizadoresSoltar.current[campo] = null;
+  }
+
+  function alSoltarCampo(campo, evento) {
+    let elemento = evento.target;
+    cancelarBusquedaAlSoltar(campo);
+
+    temporizadoresSoltar.current[campo] = setTimeout(() => {
+      temporizadoresSoltar.current[campo] = null;
+
+      if (document.activeElement === elemento) {
+        return;
+      }
+      if (seccionActual.current !== 'direccion') {
         return;
       }
 
-      if (punto === null) {
-        setMensaje(MENSAJE_ERROR_UBICACION);
-        marcarError(campo, true);
+      let texto = textoOrigenActual.current;
+      if (campo === 'destino') {
+        texto = textoDestinoActual.current;
+      }
+      if (texto.trim() === '') {
         return;
       }
-    }
+      if (ultimoPunto.current[campo] !== null) {
+        return;
+      }
+      if (ultimoTextoBuscado.current[campo] === texto.trim()) {
+        return;
+      }
 
-    let textoReciente = texto.trim();
-    if (local !== null) {
-      textoReciente = ponerMayuscula(local.descripcion);
-    }
-
-    aplicarPunto(campo, punto, null, true);
-    guardarReciente(textoReciente, punto);
+      buscarPunto(campo, texto, true);
+    }, ESPERA_AL_SOLTAR_CAMPO);
   }
 
   function guardarReciente(texto, punto) {
@@ -845,17 +954,22 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
     guardarRecientes(nuevos);
   }
 
-  function aplicarPunto(campo, punto, textoCampo, volar) {
+  function aplicarPunto(campo, punto, textoCampo, volar, sinCambiarFoco) {
     ultimoPunto.current[campo] = punto;
     setMensaje('');
-    setSeleccionandoEnMapa(null);
+    setOpcionesLugar(null);
+    if (!sinCambiarFoco) {
+      setSeleccionandoEnMapa(null);
+    }
     marcarError(campo, false);
 
     let otroPunto = null;
     if (campo === 'origen') {
       onCambiarOrigen(punto);
       otroPunto = destinoActual.current;
-      setCampoActivo('destino');
+      if (!sinCambiarFoco) {
+        setCampoActivo('destino');
+      }
     } else {
       onCambiarDestino(punto);
       otroPunto = origenActual.current;
@@ -886,39 +1000,84 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
     if (!forzar && pidiendoUbicacion.current) {
       return;
     }
-    if (!forzar) {
-      pidiendoUbicacion.current = true;
+
+    let numero = numeroPedidoUbicacion.current + 1;
+    numeroPedidoUbicacion.current = numero;
+    pidiendoUbicacion.current = true;
+
+    function esVigente() {
+      return numeroPedidoUbicacion.current === numero;
+    }
+
+    function alObtener(posicion) {
+      if (!esVigente()) {
+        return;
+      }
+      pidiendoUbicacion.current = false;
+
+      if (!forzar && (origenActual.current !== null || textoOrigenActual.current !== '')) {
+        if (avisar) {
+          setMensaje('');
+        }
+        return;
+      }
+
+      let punto = [posicion.coords.latitude, posicion.coords.longitude];
+
+      aplicarPunto(campo, punto, null, avisar);
+      escribirDireccion(campo, punto, false);
+
+      if (onUbicacionConcedida) {
+        onUbicacionConcedida();
+      }
+    }
+
+    function alFallarDefinitivo(error) {
+      if (!esVigente()) {
+        return;
+      }
+      pidiendoUbicacion.current = false;
+
+      if (avisar) {
+        setMensaje(mensajeDeErrorDeUbicacion(error));
+      }
+    }
+
+    function alFallarRapido(error) {
+      if (!esVigente()) {
+        return;
+      }
+      if (error && error.code === 1) {
+        alFallarDefinitivo(error);
+        return;
+      }
+      if (avisar) {
+        setMensaje('Buscando tu ubicación con más precisión...');
+      }
+      navigator.geolocation.getCurrentPosition(alObtener, alFallarDefinitivo, OPCIONES_UBICACION_PRECISA);
     }
 
     if (avisar) {
       setMensaje('Buscando tu ubicación...');
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (posicion) => {
-        pidiendoUbicacion.current = false;
+    navigator.geolocation.getCurrentPosition(alObtener, alFallarRapido, OPCIONES_UBICACION_RAPIDA);
 
-        if (!forzar && (origenActual.current !== null || textoOrigenActual.current !== '')) {
-          if (avisar) {
-            setMensaje('');
-          }
+    if (avisar) {
+      obtenerPermisoUbicacion().then((permiso) => {
+        if (permiso === null || !esVigente() || permiso.state !== 'prompt') {
           return;
         }
+        setMensaje('Aceptá el permiso de ubicación en el aviso del navegador para continuar.');
 
-        let punto = [posicion.coords.latitude, posicion.coords.longitude];
-
-        aplicarPunto(campo, punto, null, avisar);
-        escribirDireccion(campo, punto, false);
-      },
-      (error) => {
-        pidiendoUbicacion.current = false;
-
-        if (avisar) {
-          setMensaje(mensajeDeErrorDeUbicacion(error));
-        }
-      },
-      OPCIONES_UBICACION_ACTUAL
-    );
+        permiso.onchange = () => {
+          permiso.onchange = null;
+          if (esVigente() && permiso.state === 'granted') {
+            setMensaje('Buscando tu ubicación...');
+          }
+        };
+      });
+    }
   }
 
   function cancelarSeleccionEnMapa() {
@@ -926,6 +1085,8 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
   }
 
   function abrirDesplegable(campo) {
+    cancelarBusquedaAlSoltar(campo);
+    setOpcionesLugar(null);
     setCampoActivo(campo);
     setDesplegable(campo);
 
@@ -937,6 +1098,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
   }
 
   function elegirUbicacionActual(campo) {
+    cancelarBusquedaAlSoltar(campo);
     setDesplegable(null);
     setSeleccionandoEnMapa(null);
     pedirUbicacionActual(true, campo, true);
@@ -949,6 +1111,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
   }
 
   function seleccionarEnElMapa(campo) {
+    cancelarBusquedaAlSoltar(campo);
     setCampoActivo(campo);
     setDesplegable(null);
 
@@ -979,6 +1142,10 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
   function cambiarTextoPunto(campo, valor) {
     ultimoPunto.current[campo] = null;
     marcarError(campo, false);
+    cancelarBusquedaAlSoltar(campo);
+    numeroBusquedaLugar.current[campo] = numeroBusquedaLugar.current[campo] + 1;
+    setOpcionesLugar((actual) => (actual !== null && actual.campo === campo ? null : actual));
+    setMensaje((actual) => (actual === MENSAJE_BUSCANDO ? '' : actual));
 
     if (campo === 'origen') {
       setTextoOrigen(valor);
@@ -997,6 +1164,11 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
   }
 
   function limpiarPuntos() {
+    cancelarBusquedaAlSoltar('origen');
+    cancelarBusquedaAlSoltar('destino');
+    numeroBusquedaLugar.current = { origen: numeroBusquedaLugar.current.origen + 1, destino: numeroBusquedaLugar.current.destino + 1 };
+    ultimoTextoBuscado.current = { origen: '', destino: '' };
+    setOpcionesLugar(null);
     ultimoPunto.current = { origen: null, destino: null };
     onCambiarOrigen(null);
     onCambiarDestino(null);
@@ -1398,6 +1570,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
                 value={textoOrigen}
                 onFocus={() => abrirDesplegable('origen')}
                 onClick={() => abrirDesplegable('origen')}
+                onBlur={(evento) => alSoltarCampo('origen', evento)}
                 onChange={(evento) => cambiarTextoPunto('origen', evento.target.value)}
                 onKeyDown={(evento) => {
                   if (evento.key === 'Enter') {
@@ -1422,6 +1595,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
                 value={textoDestino}
                 onFocus={() => abrirDesplegable('destino')}
                 onClick={() => abrirDesplegable('destino')}
+                onBlur={(evento) => alSoltarCampo('destino', evento)}
                 onChange={(evento) => cambiarTextoPunto('destino', evento.target.value)}
                 onKeyDown={(evento) => {
                   if (evento.key === 'Enter') {
@@ -1441,7 +1615,30 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
 
             {desplegable === null && (
             <>
-            {ayuda !== null && <div className="buscador__ayuda">{ayuda}</div>}
+            {opcionesLugar !== null && (
+              <div className="desplegable">
+                <div className="desplegable__titulo">¿Cuál de estos lugares?</div>
+
+                {opcionesLugar.lugares.map((lugar) => (
+                  <button
+                    key={lugar.id}
+                    type="button"
+                    className="desplegable__opcion"
+                    onClick={() => elegirLugar(opcionesLugar.campo, lugar)}
+                  >
+                    <span className="desplegable__icono">
+                      <MapPin size={20} />
+                    </span>
+                    <span className="desplegable__texto">
+                      {lugar.nombre}
+                      {lugar.detalle !== '' && <span className="desplegable__detalle">{lugar.detalle}</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {opcionesLugar === null && ayuda !== null && <div className="buscador__ayuda">{ayuda}</div>}
 
             {(origen !== null || destino !== null) && (
               <div className="buscador__encabezado">
@@ -1621,6 +1818,11 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
 
                 let tildado = ramalesOcultos[ramal.id] !== true;
 
+                let indiceColor = posicion;
+                if (sentidosLinea.colores && sentidosLinea.colores.has(ramal.id)) {
+                  indiceColor = sentidosLinea.colores.get(ramal.id);
+                }
+
                 let claseFila = 'fila-linea';
                 if (tildado) {
                   claseFila = 'fila-linea fila-linea--activa';
@@ -1635,7 +1837,7 @@ function Buscador({ seccionActiva, datosParadas, lineaSeleccionada, sentidosLine
                     />
                     <span
                       className="fila-linea__color"
-                      style={{ backgroundColor: colorDeRamal(posicion) }}
+                      style={{ backgroundColor: colorDeRamal(indiceColor) }}
                     ></span>
                     <span className="fila-linea__nombre">{ramal.nombre}</span>
                   </label>
