@@ -13,9 +13,153 @@
         href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap"
         rel="stylesheet"
         />
+
+    <style>
+      #carga-inicial {
+        position: fixed;
+        inset: 0;
+        z-index: 3000;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0093e1;
+        color: #ffffff;
+        font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.45s ease, visibility 0s linear 0s;
+      }
+
+      #carga-inicial.carga-inicial--oculta {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.45s ease, visibility 0s linear 0.45s;
+      }
+
+      .carga__centro {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: clamp(18px, 3vw, 34px);
+        padding: 0 24px;
+        text-align: center;
+      }
+
+      .carga__logo {
+        width: clamp(150px, 20vw, 300px);
+        height: auto;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+
+      .carga__giro {
+        width: 42px;
+        height: 42px;
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #ffffff;
+        border-radius: 50%;
+        animation: carga-giro 0.9s linear infinite;
+      }
+
+      @keyframes carga-giro {
+        to { transform: rotate(360deg); }
+      }
+
+      .carga__texto {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .carga__texto--error,
+      .carga__reintentar {
+        display: none;
+      }
+
+      .carga__reintentar {
+        padding: 10px 22px;
+        border: none;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #0093e1;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      #carga-inicial.carga-inicial--error .carga__giro,
+      #carga-inicial.carga-inicial--error .carga__texto--cargando {
+        display: none;
+      }
+
+      #carga-inicial.carga-inicial--error .carga__texto--error {
+        display: block;
+      }
+
+      #carga-inicial.carga-inicial--error .carga__reintentar {
+        display: inline-block;
+      }
+
+      .carga__forma {
+        position: absolute;
+      }
+
+      .carga__forma svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .carga__forma--derecha {
+        top: 0;
+        right: 0;
+        width: clamp(140px, 25vw, 480px);
+      }
+
+      .carga__forma--izquierda {
+        bottom: 0;
+        left: 0;
+        width: clamp(152px, 27.2vw, 523px);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .carga__giro {
+          animation-duration: 2.4s;
+        }
+      }
+    </style>
   
   </head>
   <body>
+
+    <div id="carga-inicial" role="status" aria-live="polite">
+
+      <div class="carga__forma carga__forma--derecha">
+        <svg viewBox="1081 0 359 458" aria-hidden="true">
+          <path fill="#ffffff" fill-rule="evenodd" d="M1253,0 L1256,1 L1258,5 L1226,61 L1223,63 L1197,48 L1183,72 L1183,76 L1205,88 L1208,92 L1173,151 L1146,136 L1131,162 L1158,178 L1124,237 L1122,238 L1096,223 L1081,250 L1107,266 L1100,280 L1126,295 L1135,281 L1194,315 L1186,333 L1210,347 L1213,347 L1223,332 L1279,364 L1282,368 L1273,383 L1300,398 L1310,382 L1369,416 L1361,434 L1387,449 L1398,433 L1439,457 L1439,421 L1413,406 L1439,360 L1439,297 L1435,302 L1376,268 L1411,207 L1439,224 L1439,188 L1426,180 L1439,158 L1439,71 L1389,42 L1413,0 L1377,0 L1362,26 L1316,0 Z M1360,295 L1420,330 L1385,390 L1325,355 Z M1273,244 L1332,279 L1298,339 L1238,304 Z M1185,194 L1245,229 L1210,289 L1150,254 Z M1323,157 L1383,192 L1348,252 L1288,217 Z M1236,106 L1295,141 L1261,201 L1201,166 Z M1374,69 L1433,104 L1399,164 L1339,130 Z M1286,19 L1346,54 L1311,114 L1251,79 Z" />
+        </svg>
+      </div>
+
+      <div class="carga__forma carga__forma--izquierda">
+        <svg viewBox="0 636 391 388" aria-hidden="true">
+          <path fill="#ffffff" fill-rule="evenodd" d="M270,636 L240,644 L258,709 L255,712 L191,728 L173,662 L143,670 L160,733 L158,738 L94,755 L75,688 L45,696 L63,762 L0,780 L0,919 L17,980 L16,985 L0,989 L0,1021 L25,1014 L28,1023 L60,1023 L57,1006 L123,988 L133,1023 L165,1023 L154,981 L219,962 L222,964 L237,1023 L385,1023 L390,1021 L382,991 L369,995 L366,994 L349,931 L350,927 L367,923 L359,893 L340,897 L323,831 L341,825 L332,795 L317,800 L314,799 L299,745 L297,733 L314,728 L307,698 L292,702 L287,700 Z M318,936 L336,1003 L270,1021 L251,955 Z M97,891 L115,957 L110,960 L48,976 L30,909 Z M194,865 L213,931 L146,950 L127,883 Z M292,839 L310,905 L244,924 L225,857 Z M70,793 L89,860 L22,878 L4,812 Z M168,767 L186,834 L120,852 L101,786 Z M266,741 L284,808 L217,826 L199,759 Z" />
+        </svg>
+      </div>
+
+      <div class="carga__centro">
+        <img class="carga__logo" src="/src/assets/logo-pladi.png" alt="PLADI" draggable="false" />
+        <div class="carga__giro" aria-hidden="true"></div>
+        <p class="carga__texto carga__texto--cargando">Cargando</p>
+        <p class="carga__texto carga__texto--error">No se pudieron cargar los datos.</p>
+        <button type="button" class="carga__reintentar" onclick="location.reload()">Reintentar</button>
+      </div>
+
+    </div>
 
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
