@@ -1,20 +1,41 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { MapContainer, TileLayer, Polyline, CircleMarker } from 'react-leaflet';
 import Navegacion from './componentes/Navegacion.jsx';
 import Buscador from './componentes/Buscador.jsx';
 import MarkersVisibles from './componentes/MarkersVisibles.jsx';
 import CapaRecorridos, { separarPorSentido } from './componentes/CapaRecorridos.jsx';
 import CapaViaje from './componentes/CapaViaje.jsx';
-import datosParadas from './ubicacionParadas.json';
+import AvisoZoom from './componentes/AvisoZoom.jsx';
+import PantallaCarga from './componentes/PantallaCarga.jsx';
 import './App.css';
 
+function unirRamales(base, agregados) {
+  let idsExistentes = new Set();
+  for (let i = 0; i < base.banderas.length; i++) {
+    idsExistentes.add(base.banderas[i].id);
+  }
+
+  let banderas = [...base.banderas];
+  for (let i = 0; i < agregados.length; i++) {
+    if (!idsExistentes.has(agregados[i].id)) {
+      banderas.push(agregados[i]);
+    }
+  }
+
+  return { ...base, banderas: banderas };
+}
+
 const centroLaPlata = [-34.9214, -57.9544];
+
+const LIMITES_PARTIDO = [[-35.2456, -58.2986], [-34.825, -57.7427]];
 
 const ZOOM_PARADAS = 16;
 
 const ZOOM_RECORRIDO = 13;
 
 const ZOOM_INICIAL = 15;
+
+const ESPERA_MAXIMA_TILES = 8000;
 
 function seccionInicial() {
   if (window.matchMedia('(min-width: 1000px)').matches) {
@@ -31,7 +52,7 @@ const ESTILO_MI_UBICACION = {
   interactive: false,
 };
 
-const OPCIONES_MI_UBICACION = { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 };
+const OPCIONES_MI_UBICACION = { enableHighAccuracy: false, maximumAge: 30000, timeout: 20000 };
 
 function crearLineasVisibles(lineas) {
   let resultado = {};
@@ -41,7 +62,13 @@ function crearLineasVisibles(lineas) {
   return resultado;
 }
 
-function App() {
+function metrosEntre(a, b) {
+  let dy = (a[0] - b[0]) * 111320;
+  let dx = (a[1] - b[1]) * 111320 * Math.cos((a[0] * Math.PI) / 180);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function AppMapa({ datosParadas, onMapaListo }) {
 
   const [seccionActiva, setSeccionActiva] = useState(seccionInicial);
 
@@ -57,25 +84,67 @@ function App() {
   const [banderaMostrada, setBanderaMostrada] = useState(null);
   const [lineasVisibles, setLineasVisibles] = useState(crearLineasVisibles(datosParadas.lineas));
   const [miUbicacion, setMiUbicacion] = useState(null);
+  const [seguirUbicacion, setSeguirUbicacion] = useState(false);
+
+  
+  useEffect(() => {
+    if (!navigator.geolocation || !navigator.permissions || !navigator.permissions.query) {
+      return;
+    }
+
+    let permiso = null;
+    let vivo = true;
+
+    function alCambiarPermiso() {
+      setSeguirUbicacion(permiso.state === 'granted');
+    }
+
+    navigator.permissions
+      .query({ name: 'geolocation' })
+      .then((resultado) => {
+        if (!vivo) {
+          return;
+        }
+        permiso = resultado;
+        permiso.onchange = alCambiarPermiso;
+        alCambiarPermiso();
+      })
+      .catch(() => {});
+
+    return () => {
+      vivo = false;
+      if (permiso !== null) {
+        permiso.onchange = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
-    if (!navigator.geolocation) {
+    if (!seguirUbicacion || !navigator.geolocation) {
+      setMiUbicacion(null);
       return;
     }
 
     let idSeguimiento = null;
+    let ultimoPunto = null;
+    let ultimoInstante = 0;
 
     function alRecibirUbicacion(posicion) {
-      setMiUbicacion([posicion.coords.latitude, posicion.coords.longitude]);
+      let punto = [posicion.coords.latitude, posicion.coords.longitude];
+      let ahora = Date.now();
+
+      if (ultimoPunto !== null && metrosEntre(punto, ultimoPunto) < 10 && ahora - ultimoInstante < 5000) {
+        return;
+      }
+
+      ultimoPunto = punto;
+      ultimoInstante = ahora;
+      setMiUbicacion(punto);
     }
 
     function alFallarUbicacion(error) {
       if (error && error.code === 1) {
-        setMiUbicacion(null);
-        if (idSeguimiento !== null) {
-          navigator.geolocation.clearWatch(idSeguimiento);
-          idSeguimiento = null;
-        }
+        setSeguirUbicacion(false);
       }
     }
 
@@ -86,10 +155,38 @@ function App() {
     );
 
     return () => {
-      if (idSeguimiento !== null) {
-        navigator.geolocation.clearWatch(idSeguimiento);
-      }
+      navigator.geolocation.clearWatch(idSeguimiento);
     };
+  }, [seguirUbicacion]);
+
+  const eventosTiles = useMemo(() => ({ load: onMapaListo }), [onMapaListo]);
+
+  
+  useEffect(() => {
+    if (mapa === null) {
+      return;
+    }
+
+    function ajustarZoomMinimo() {
+      mapa.setMinZoom(0);
+      let zoomMinimo = Math.ceil(mapa.getBoundsZoom(LIMITES_PARTIDO, true));
+      if (!isFinite(zoomMinimo) || zoomMinimo < 0) {
+        zoomMinimo = 0;
+      }
+      mapa.setMinZoom(zoomMinimo);
+    }
+
+    ajustarZoomMinimo();
+    mapa.on('resize', ajustarZoomMinimo);
+
+    return () => {
+      mapa.off('resize', ajustarZoomMinimo);
+    };
+  }, [mapa]);
+
+  useEffect(() => {
+    let temporizador = setTimeout(onMapaListo, ESPERA_MAXIMA_TILES);
+    return () => clearTimeout(temporizador);
   }, []);
 
   useEffect(() => {
@@ -184,12 +281,15 @@ function App() {
         center={centroLaPlata}
         zoom={zoomInicial}
         zoomControl={false}
+        maxBounds={LIMITES_PARTIDO}
+        maxBoundsViscosity={1.0}
         style={{ height: '100%', width: '100%' }}
       >
 
         <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           referrerPolicy="strict-origin-when-cross-origin"
+          eventHandlers={eventosTiles}
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
 
@@ -206,7 +306,11 @@ function App() {
         )}
 
         {seccionActiva === 'recorrido' && (
-          <CapaRecorridos ramales={sentidosLinea[sentidoRecorrido]} ramalesOcultos={ramalesOcultos} />
+          <CapaRecorridos
+            ramales={sentidosLinea[sentidoRecorrido]}
+            ramalesOcultos={ramalesOcultos}
+            colores={sentidosLinea.colores}
+          />
         )}
 
         {miUbicacion !== null && (
@@ -214,6 +318,12 @@ function App() {
         )}
 
       </MapContainer>
+
+      <AvisoZoom
+        mapa={mapa}
+        visible={seccionActiva === 'paradas' && banderaMostrada === null}
+        zoomDestino={ZOOM_PARADAS}
+      />
 
       <Buscador
         seccionActiva={seccionActiva}
@@ -236,6 +346,7 @@ function App() {
         onCambiarOrigen={setOrigen}
         onCambiarDestino={setDestino}
         onElegirViaje={setViajeElegido}
+        onUbicacionConcedida={() => setSeguirUbicacion(true)}
       />
 
       {mostrarBotonSentido && (
@@ -266,6 +377,44 @@ function App() {
       />
 
     </div>
+  );
+}
+
+function App() {
+
+  const [datosParadas, setDatosParadas] = useState(null);
+  const [errorCarga, setErrorCarga] = useState(false);
+  const [mapaListo, setMapaListo] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+
+    Promise.all([import('./ubicacionParadas.json'), import('./ramalesAgregados.json')])
+      .then((modulos) => {
+        if (vivo) {
+          setDatosParadas(unirRamales(modulos[0].default, modulos[1].default));
+        }
+      })
+      .catch(() => {
+        if (vivo) {
+          setErrorCarga(true);
+        }
+      });
+
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
+  const avisarMapaListo = useCallback(() => setMapaListo(true), []);
+
+  return (
+    <>
+      {datosParadas !== null && (
+        <AppMapa datosParadas={datosParadas} onMapaListo={avisarMapaListo} />
+      )}
+      <PantallaCarga visible={datosParadas === null || !mapaListo} error={errorCarga} />
+    </>
   );
 }
 

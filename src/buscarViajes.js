@@ -50,7 +50,6 @@ function crearIndice(datosParadas) {
     celdas.get(clave).push(parada);
   }
 
-  // línea por código (una línea puede agrupar varios códigos)
   let lineasPorCodigo = new Map();
   for (let i = 0; i < datosParadas.lineas.length; i++) {
     let linea = datosParadas.lineas[i];
@@ -491,7 +490,6 @@ function buscarDirectos(subidas, bajadas, indice) {
       [tramo]
     );
 
-    // de cada línea se queda con su mejor variante
     let actual = mejoresPorLinea.get(tramo.linea.abbr);
     if (!actual || viaje.minutos < actual.minutos) {
       mejoresPorLinea.set(tramo.linea.abbr, viaje);
